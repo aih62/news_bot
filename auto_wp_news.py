@@ -106,14 +106,16 @@ def analyze_news_with_perplexity(news_list):
        - [출처]: <a href='링크'>매체명</a> 형식으로 표기.
 
     3. 태그: 기사 내용과 관련된 구체적인 기술 키워드(예: APT38, CVE-2024-XXXX, Zero-day 등)를 포함해 10개 이내로 추출.
+    
+    4. 이미지: 기사 원문에서 가장 대표적인 고화질 이미지 URL을 하나만 추출해줘. (적절한 이미지가 없으면 null)
 
     응답은 마크다운 없이 오직 순수 JSON 배열만 반환해:
     [
       {{
-        "title": "...",
-        "content": "...",
-        "tags": ["...", "..."],
-        "image_url": "..."
+        "title": "뉴스 제목",
+        "content": "HTML 본문",
+        "tags": ["태그1", "태그2"],
+        "image_url": "이미지 URL 혹은 null"
       }}
     ]
 
@@ -130,7 +132,7 @@ def analyze_news_with_perplexity(news_list):
     }
 
     try:
-        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=150)
+        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=180)
         content = response.json()['choices'][0]['message']['content'].strip()
         json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
         return json.loads(json_match.group()) if json_match else json.loads(content)
@@ -175,6 +177,11 @@ def post_to_wordpress(news_data, category_id):
         "categories": [category_id] if category_id else [],
         "tags": tag_ids
     }
+    
+    # "Featured Image with URL" 플러그인 필드 추가
+    if news_data.get('image_url'):
+        payload["fiwu_image_url"] = news_data['image_url']
+    
     res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload)
     if res.status_code in [200, 201]: print("발행 성공!")
     else: print(f"발행 실패: {res.text}")

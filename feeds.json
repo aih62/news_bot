@@ -1,34 +1,27 @@
 {
-    "direct_feeds": [
-        "https://feeds.feedburner.com/TheHackersNews",
-        "https://www.bleepingcomputer.com/feed/",
-        "https://krebsonsecurity.com/feed/",
-        "https://www.darkreading.com/rss.xml",
-        "https://feeds.feedburner.com/securityweek",
-        "https://therecord.media/feed/",
-        "https://www.scmagazine.com/feed",
-        "https://www.infosecurity-magazine.com/rss/news/",
-        "https://cyberscoop.com/feed/",
-        "https://www.wired.com/feed/category/security/latest/rss",
-        "https://www.zdnet.com/topic/security/rss.xml",
-        "https://techcrunch.com/category/security/feed/",
-        "https://feeds.arstechnica.com/arstechnica/security",
-        "https://www.techtarget.com/searchsecurity/rss/News-RSS-Feed.xml",
-        "https://www.csoonline.com/feed",
-        "https://www.govinfosecurity.com/rss-feeds",
-        "https://feeds.feedburner.com/eset/blog",
-        "https://feeds.washingtonpost.com/rss/business/technology",
-        "https://hackread.com/feed",
-        "https://rss.politico.com/cybersecurity.xml",
-        "https://dailysecu.com/rss/S1N1.xml",
-        "https://www.boannews.com/lib/news_rss.xml"
+  "keywords": {
+    "국내정책_직결": [
+      "개인정보보호법", "정보보호산업법", "ISMS-P", "사이버보안기본법",
+      "개인정보보호위원회", "KISA", "과기정통부", "국가사이버안보전략"
     ],
-    "keywords": [
-        "사이버보안", "정보보안", "Cybersecurity", "Ransomware", 
-        "Vulnerability", "Malware", "Data breach", "Cyber attack",
-        "Zero Trust", "AI Security", "Quantum-safe", "Supply Chain Attack",
-        "Social Engineering", "Zero-day", "Living off the Land", "CRA(EU 사이버복원법)",
-        "SEC Disclosure", "Privacy Law", "OT Security", "ICS", "Automotive Cybersecurity",
-        "Financial Security"
+    "국제규제_비교분석": [
+      "CRA", "EU Cyber Resilience Act", "NIS2", "DORA",
+      "SEC Cybersecurity Disclosure", "NIST CSF 2.0",
+      "Privacy Law", "GDPR enforcement", "US CIRCIA"
+    ],
+    "기술_위협_트렌드": [
+      "Ransomware", "Zero-day", "Supply Chain Attack", "Living off the Land",
+      "AI Security", "AI-powered attack", "Deepfake fraud",
+      "Quantum-safe", "Post-Quantum Cryptography", "Zero Trust"
+    ],
+    "산업_인프라_보안": [
+      "OT Security", "ICS", "SCADA", "Critical Infrastructure",
+      "Automotive Cybersecurity", "IoT Security", "Cloud Security",
+      "Financial Security", "Healthcare Cybersecurity"
+    ],
+    "침해사고_취약점": [
+      "Data breach", "Cyber attack", "Vulnerability", "Malware",
+      "APT", "Social Engineering", "Phishing", "CVE"
     ]
+  }
 }

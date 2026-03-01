@@ -13,10 +13,10 @@ WP_USERNAME = os.getenv("WP_USERNAME")
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
 
 # 본인의 워드프레스 주소 (수정 필요 시 여기서 변경)
-WP_SITE_URL = "https://ajken.mycafe24.com"
+WP_SITE_URL = os.getenv("WP_SITE_URL", "https://ajken.mycafe24.com")
 
-# 뉴스 검색 키워드 및 RSS URL
-RSS_URL = "https://news.google.com/rss/search?q=사이버보안+OR+정보보안&hl=ko&gl=KR&ceid=KR:ko"
+# 뉴스 검색 키워드 및 RSS URL (영문 키워드 추가 및 검색 범위 확장)
+RSS_URL = "https://news.google.com/rss/search?q=사이버보안+OR+정보보안+OR+%22Cyber+security%22+OR+%22Information+Security%22&hl=ko&gl=KR&ceid=KR:ko"
 # ========================================================
 
 def get_rss_news():
@@ -25,7 +25,7 @@ def get_rss_news():
     try:
         feed = feedparser.parse(RSS_URL)
         entries = []
-        for entry in feed.entries[:30]:
+        for entry in feed.entries[:50]: # 검색 범위를 조금 더 넓힘
             entries.append({
                 "title": entry.title,
                 "link": entry.link,
@@ -49,20 +49,23 @@ def analyze_news_with_perplexity(news_list):
     }
 
     prompt = f"""
-    너는 사이버 보안 전문가 뉴스 편집자야. 아래 제공된 뉴스 리스트 중 
+    너는 글로벌 사이버 보안 전문가 뉴스 편집자야. 아래 제공된 뉴스 리스트 중 
     기술적 가치, 사회적 파급력, 인용 횟수를 고려하여 가장 중요한 뉴스 10개를 선정해줘.
     
-    각 뉴스에 대해 다음 작업을 수행해:
-    1. 핵심 내용을 3~4문장으로 요약해 (한국어).
-    2. 뉴스 내용에 가장 적합한 워드프레스 카테고리 하나를 정해 (예: 기술, 정책, 산업, 보안사고).
-    3. 관련 태그 3~5개를 생성해.
-    4. 뉴스 원문에서 가장 대표적인 이미지 URL을 찾아줘. (없으면 null로 표시)
+    각 뉴스에 대해 다음 작업을 수행해 (반드시 한국어로 작성):
+    1. 제목: 영문 뉴스인 경우 원문의 의미를 살려 한국어로 번역해.
+    2. 본문 요약: 핵심 내용을 중심으로 '개조식(- 형태)'으로 정리해. 
+       - 가급적 20문장 이내로 상세하게 구성해줘.
+       - 기술적인 용어는 전문가답게 적절히 사용해.
+    3. 뉴스 내용에 가장 적합한 워드프레스 카테고리 하나를 정해 (예: 기술, 정책, 산업, 보안사고).
+    4. 관련 태그 3~5개를 생성해.
+    5. 뉴스 원문에서 가장 대표적인 이미지 URL을 찾아줘. (없으면 null로 표시)
 
     결과는 반드시 아래의 순수 JSON 리스트 형식으로만 응답해 (설명 없이 JSON만):
     [
       {{
-        "title": "뉴스 제목",
-        "content": "요약된 본문 내용",
+        "title": "번역/정리된 뉴스 제목",
+        "content": "- 요약 내용 1\n- 요약 내용 2\n- ...",
         "category": "카테고리명",
         "tags": ["태그1", "태그2"],
         "image_url": "이미지 주소 혹은 null",

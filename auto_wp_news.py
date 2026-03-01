@@ -15,17 +15,25 @@ WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
 # 본인의 워드프레스 주소 (수정 필요 시 여기서 변경)
 WP_SITE_URL = os.getenv("WP_SITE_URL", "https://ajken.mycafe24.com")
 
-# 뉴스 검색 키워드 및 RSS URL (영문 키워드 추가 및 검색 범위 확장)
-RSS_URL = "https://news.google.com/rss/search?q=사이버보안+OR+정보보안+OR+%22Cyber+security%22+OR+%22Information+Security%22&hl=ko&gl=KR&ceid=KR:ko"
+# 뉴스 검색 키워드 및 RSS URL (글로벌 전문 매체 타겟팅)
+TARGET_SITES = [
+    "thehackernews.com", "darkreading.com", "securityweek.com", "scmagazine.com", 
+    "infosecurity-magazine.com", "cyberscoop.com", "therecord.media", "arstechnica.com", 
+    "techtarget.com", "wired.com", "krebsonsecurity.com", "csoonline.com", 
+    "bleepingcomputer.com", "govinfosecurity.com", "welivesecurity.com", "zdnet.com", 
+    "techcrunch.com", "washingtonpost.com", "hackread.com", "politico.com"
+]
+site_query = " OR ".join([f"site:{site}" for site in TARGET_SITES])
+RSS_URL = f"https://news.google.com/rss/search?q=({site_query})+(사이버보안+OR+정보보안+OR+%22Cyber+security%22+OR+%22Information+Security%22)&hl=ko&gl=KR&ceid=KR:ko"
 # ========================================================
 
 def get_rss_news():
     """구글 뉴스 RSS에서 최신 기사 목록을 가져옵니다."""
-    print("RSS 피드 읽는 중...")
+    print("글로벌 전문 매체 RSS 피드 읽는 중...")
     try:
         feed = feedparser.parse(RSS_URL)
         entries = []
-        for entry in feed.entries[:50]: # 검색 범위를 조금 더 넓힘
+        for entry in feed.entries[:80]: # 해외 매체가 많으므로 더 많이 수집
             entries.append({
                 "title": entry.title,
                 "link": entry.link,
@@ -52,24 +60,27 @@ def analyze_news_with_perplexity(news_list):
     너는 글로벌 사이버 보안 전문가 뉴스 편집자야. 아래 제공된 뉴스 리스트 중 
     기술적 가치, 사회적 파급력, 인용 횟수를 고려하여 가장 중요한 뉴스 10개를 선정해줘.
     
-    각 뉴스에 대해 다음 작업을 수행해 (반드시 한국어로 작성):
-    1. 제목: 영문 뉴스인 경우 원문의 의미를 살려 한국어로 번역해.
-    2. 본문 요약: 핵심 내용을 중심으로 '개조식(- 형태)'으로 정리해. 
-       - 가급적 20문장 이내로 상세하게 구성해줘.
-       - 기술적인 용어는 전문가답게 적절히 사용해.
-    3. 뉴스 내용에 가장 적합한 워드프레스 카테고리 하나를 정해 (예: 기술, 정책, 산업, 보안사고).
-    4. 관련 태그 3~5개를 생성해.
-    5. 뉴스 원문에서 가장 대표적인 이미지 URL을 찾아줘. (없으면 null로 표시)
+    각 뉴스에 대해 다음 구조로 상세하게 작성해 (반드시 한국어로 작성):
+
+    1. 제목: 영문 뉴스인 경우 원문의 의미를 살려 한국어로 번역하되 전문적인 제목으로 작성해.
+    
+    2. 본문 내용 (HTML 태그를 사용하여 작성):
+       - [서브 헤드라인]: <h3> 태그를 사용하여 기사의 핵심 내용을 한 줄로 요약해줘. (기사 제목보다 구체적이고 깊이 있는 내용을 담아야 함)
+       - [주요내용 요약]: 기사의 주요 내용을 10개 이하의 글머리 기호("-" 사용)로 요약해줘.
+         * 반드시 '개조식'(문장 끝을 '~함', '~임', '~함' 등으로 간결하게 마무리)으로 작성할 것.
+         * 각 문장은 최소 50글자 내외로 상세하게 작성할 것.
+         * 문장들 간에는 상호 논리적인 흐름이 있어야 함.
+       - [시사점]: 우리나라의 기술, 정책, 산업 현황을 고려했을 때 어떤 부분의 개선이나 반영이 필요한지 3문장 이내로 작성해줘.
+       - [출처]: 해당 기사의 '매체명'을 표시하고, 이를 클릭하면 원문 기사 링크로 이동할 수 있도록 <a href='링크'>매체명</a> 형식으로 작성해줘.
 
     결과는 반드시 아래의 순수 JSON 리스트 형식으로만 응답해 (설명 없이 JSON만):
     [
       {{
-        "title": "번역/정리된 뉴스 제목",
-        "content": "- 요약 내용 1\n- 요약 내용 2\n- ...",
+        "title": "뉴스 제목",
+        "content": "위의 모든 섹션이 포함된 HTML 형식의 본문",
         "category": "카테고리명",
         "tags": ["태그1", "태그2"],
-        "image_url": "이미지 주소 혹은 null",
-        "source_url": "원본 링크"
+        "image_url": "이미지 주소 혹은 null"
       }}
     ]
 
@@ -78,7 +89,7 @@ def analyze_news_with_perplexity(news_list):
     """
 
     data = {
-        "model": "sonar-reasoning",
+        "model": "sonar",
         "messages": [
             {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변합니다."},
             {"role": "user", "content": prompt}
@@ -87,7 +98,11 @@ def analyze_news_with_perplexity(news_list):
 
     try:
         response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=60)
-        content = response.json()['choices'][0]['message']['content']
+        res_json = response.json()
+        if 'choices' not in res_json:
+            print(f"API 응답 에러: {res_json}")
+            return []
+        content = res_json['choices'][0]['message']['content']
         json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
         if json_match:
             return json.loads(json_match.group())
@@ -155,7 +170,7 @@ def post_to_wordpress(news_data):
     
     payload = {
         "title": news_data['title'],
-        "content": f"{news_data['content']}<br><br><a href='{news_data['source_url']}' target='_blank'>원문 기사 읽기</a>",
+        "content": news_data['content'],
         "status": "publish",
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids,
@@ -180,7 +195,9 @@ def main():
         print("선정된 뉴스가 없습니다.")
         return
 
-    for news in selected_news:
+    # [테스트용] 첫 번째 뉴스 딱 1개만 포스팅하여 형식을 확인합니다.
+    test_news = selected_news[:1]
+    for news in test_news:
         try:
             post_to_wordpress(news)
             time.sleep(2)

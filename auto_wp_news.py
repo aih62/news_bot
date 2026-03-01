@@ -14,85 +14,69 @@ WP_USERNAME = os.getenv("WP_USERNAME")
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
 WP_SITE_URL = os.getenv("WP_SITE_URL", "https://ajken.mycafe24.com")
 
-# Ultimate 글로벌 보안 소스 리스트 (32개 정예 사이트)
-TARGET_SITES = [
-    # Global Security News (Top Tier)
-    "thehackernews.com", "bleepingcomputer.com", "therecord.media", "krebsonsecurity.com",
-    "darkreading.com", "securityweek.com", "cyberscoop.com", "infosecurity-magazine.com",
-    "scmagazine.com", "arstechnica.com", "wired.com", "csoonline.com",
-    # Tech Vendor Intelligence (Primary Sources)
-    "mandiant.com", "crowdstrike.com", "paloaltonetworks.com", "microsoft.com", 
-    "googleblog.com", "cloudflare.com", "trendmicro.com", "sentinelone.com",
-    # Vulnerability & Deep Research
-    "zerodayinitiative.com", "sans.org", "citizenlab.ca",
-    # Cloud-Native & ICS/OT Security
-    "wiz.io", "snyk.io", "sysdig.com", "dragos.com",
-    # Enterprise & Policy
-    "zdnet.com", "techcrunch.com", "politico.com",
-    # Domestic Trends
-    "boannews.com", "dailysecu.com"
-]
-
-KEYWORDS = [
-    "사이버보안", "정보보안", "Cybersecurity", "Ransomware", 
-    "Vulnerability", "Malware", "Data breach", "Cyber attack"
-]
-
-site_query = " OR ".join([f"site:{site}" for site in TARGET_SITES])
-keyword_query = " OR ".join([f'"{k}"' for k in KEYWORDS])
-search_query = f"({site_query}) ({keyword_query})"
-encoded_query = urllib.parse.quote(search_query)
-
-# tbs=qdr:d (최근 1일 필터) 및 글로벌 검색 설정
-RSS_URL = f"https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en&tbs=qdr:d"
-# ========================================================
-
-def get_rss_news():
-    """구글 뉴스 RSS에서 최근 기사 목록을 가져옵니다."""
-    print(f"글로벌 보안 소스({len(TARGET_SITES)}개) RSS 피드 읽는 중...")
+def load_feeds_config():
+    """feeds.json 파일에서 RSS 피드와 키워드 설정을 불러옵니다."""
     try:
-        feed = feedparser.parse(RSS_URL)
-        all_entries = feed.entries
-        print(f"구글 뉴스에서 검색된 총 기사 수: {len(all_entries)}개")
-        
-        if len(all_entries) == 0:
-            print("사이트 제한 검색 결과가 없어 키워드 단독 검색으로 재시도합니다...")
-            backup_query = urllib.parse.quote(" OR ".join([f'"{k}"' for k in KEYWORDS]))
-            url = f"https://news.google.com/rss/search?q={backup_query}&hl=en-US&gl=US&ceid=US:en&tbs=qdr:d"
+        with open('feeds.json', 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"설정 파일(feeds.json) 로드 실패: {e}")
+        return {"direct_feeds": [], "keywords": ["사이버보안"]}
+
+def get_rss_news(config):
+    """여러 소스의 RSS 피드를 통합하여 최근 24시간 이내의 기사를 가져옵니다."""
+    all_entries = []
+    now = datetime.now(timezone.utc)
+    one_day_ago = now - timedelta(days=1.5)
+
+    # 1. 직접 매체 RSS 수집
+    for url in config.get('direct_feeds', []):
+        print(f"매체 직접 수집 중: {url[:50]}...")
+        try:
             feed = feedparser.parse(url)
-            all_entries = feed.entries
+            for entry in feed.entries:
+                pub_time = None
+                if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                    pub_time = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
+                
+                if not pub_time or pub_time > one_day_ago:
+                    all_entries.append({
+                        "title": entry.title,
+                        "link": entry.link,
+                        "published": entry.get('published', 'N/A')
+                    })
+        except Exception as e:
+            print(f"피드 읽기 실패 ({url}): {e}")
 
-        entries = []
-        now = datetime.now(timezone.utc)
-        one_day_ago = now - timedelta(days=1)
-
-        for entry in all_entries:
-            published_time = None
-            if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                published_time = datetime(*entry.published_parsed[:6], tzinfo=timezone.utc)
-            
-            if not published_time or published_time > one_day_ago:
-                entries.append({
+    # 2. 구글 뉴스 RSS 수집 (백업용)
+    keyword_query = urllib.parse.quote(" OR ".join(config.get('keywords', [])))
+    google_rss_url = f"https://news.google.com/rss/search?q={keyword_query}+tbs=qdr:d&hl=en-US&gl=US&ceid=US:en"
+    
+    print("구글 뉴스 백업 수집 중...")
+    try:
+        google_feed = feedparser.parse(google_rss_url)
+        existing_links = {e['link'] for e in all_entries}
+        for entry in google_feed.entries:
+            if entry.link not in existing_links:
+                all_entries.append({
                     "title": entry.title,
                     "link": entry.link,
                     "published": entry.get('published', 'N/A')
                 })
-            
-            if len(entries) >= 100:
-                break
-
-        print(f"최종 분석 대상 기사 수: {len(entries)}개")
-        return entries
     except Exception as e:
-        print(f"RSS 읽기 실패: {e}")
-        return []
+        print(f"구글 RSS 읽기 실패: {e}")
+
+    # 중복 제거 및 상위 150개 제한
+    unique_entries = list({v['link']: v for v in all_entries}.values())
+    print(f"최종 통합 수집 완료: 총 {len(unique_entries)}개 기사 확보")
+    return unique_entries[:150]
 
 def analyze_news_with_perplexity(news_list):
-    """Perplexity AI를 사용하여 5가지 기준에 따라 점수를 매기고 상위 10개를 분석합니다."""
+    """Perplexity AI를 사용하여 상위 10개 뉴스를 딥다이브 분석합니다."""
     if not news_list:
         return []
         
-    print(f"Perplexity AI 정량 평가 및 분석 중 (대상 기사 {len(news_list)}개)...")
+    print(f"Perplexity AI 딥다이브 분석 중 (대상: {len(news_list)}개)...")
     
     headers = {
         "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
@@ -100,37 +84,36 @@ def analyze_news_with_perplexity(news_list):
     }
 
     prompt = f"""
-    너는 글로벌 사이버 보안 전문가 뉴스 편집자야. 아래 제공된 뉴스 리스트 중 
-    다음 5가지 평가 기준을 바탕으로 총점이 가장 높은 상위 10개 뉴스를 선정해줘:
+    너는 글로벌 보안 인텔리전스 기업의 '수석 분석가'이자 전문 뉴스 편집자야. 
+    아래 제공된 뉴스 리스트의 URL에 직접 접속하여 기사 전문을 읽고, 다음 5가지 기준에 따라 
+    총점이 가장 높은 상위 10개 뉴스를 선정해 전문적인 보안 보고서를 작성해서 워드프레스에 즉시 포스팅 가능한 고품질의 분석 리포트를 작성해줘.
+    [평가 기준: 파급력(30), 심각성(25), 시의성(20), 신뢰성(15), 시사점(10)]
+
+    각 뉴스 분석은 다음 구조를 반드시 지켜서 매우 풍부하게 작성해 (한국어로 작성):
+
+    1. 제목: 원문의 의미를 관통하며 전문가의 통찰이 느껴지는 한국어 제목
     
-    [평가 기준 (총 100점)]
-    1. 파급력 및 규모 (Impact): 30점
-    2. 기술적 심각성 (Severity): 25점
-    3. 시의성 (Timeliness): 20점
-    4. 출처 신뢰성 (Credibility): 15점
-    5. 전략적 시사점 (Insights): 10점
+    2. 본문 (HTML 태그를 사용하여 매우 상세하게 작성):
+       - [서브 헤드라인]: <h3> 태그를 사용하여 기사의 핵심 요약과 파급력을 한 줄로 명확하게 작성해줘.
+       - [심층 분석 (<h2> 중간 제목)]: 내용을 2~3개 주제(예: 공격 메커니즘, 인프라 파급력 등)로 분류하여 구조화.
+       - [세부 요약 (<ul>, <li>)]: 각 <h2> 아래 배치하며, 개조식(~함, ~임) 문체 사용.
+            * 전체 문장 수 10~15개 유지.
+            * 정보 밀도 극대화: 각 문장은 기술적 인과관계(A로 인해 B가 발생함)와 핵심 수치/데이터를 최소 2개 이상 포함할 것.
+        [전문가 코멘트 (<blockquote>)]: 조건부 작성: 
+            * 원문에 직접적인 인용구(Direct Quote)가 있는 경우에만 작성.
+            * 인물의 성함과 직함을 반드시 명시. (없으면 섹션 전체 삭제)      
+       - [시사점]: 우리(국가, 기업, 개인)에게 미칠 영향을 고려하여 전략적 제언, 정책적 개선사항, 기술적 대응방안 등 단기 및 중장기적 전략을 도출하고, 핵심적인 시사점과 제언을 명확하고 간결하게 **200자 이내**로 정리해줘.
+       - [출처]: <a href='링크'>매체명</a> 형식으로 표기.
 
-    각 뉴스에 대해 다음 구조로 상세하게 작성해 (반드시 한국어로 작성):
+    3. 태그: 기사 내용과 관련된 구체적인 기술 키워드(예: APT38, CVE-2024-XXXX, Zero-day 등)를 포함해 10개 이내로 추출.
 
-    1. 제목: 영문 뉴스인 경우 원문의 의미를 살려 한국어로 번역하되 전문적인 제목으로 작성해.
-    2. 본문 내용 (HTML 태그 사용):
-       - [서브 헤드라인]: <h3> 태그를 사용하여 기사의 핵심 내용을 한 줄로 요약해줘. (제목보다 구체적이어야 함)
-       - [주요내용 요약]: <ul> 및 <li> 태그를 사용하여 기사의 주요 내용을 10개 이하의 리스트 형식으로 요약해줘.
-         * 반드시 '개조식'(문장 끝을 '~함', '~임', '~함' 등으로 간결하게 마무리)으로 작성할 것.
-         * 각 문장은 최소 50글자 내외로 상세하게 작성할 것.
-         * 문장들 간에는 상호 논리적인 흐름이 있어야 함.
-         * 별도의 글머리 기호는 텍스트에 포함하지 말고 <li> 태그만 사용할 것.
-       - [시사점]: 국가, 기업, 개인에게 미칠 영향을 고려하여 전략적 제언, 정책적 개선사항, 기술적 대응방안 등 단기 및 중장기적 전략을 도출하고, 핵심적인 시사점과 제언을 명확하고 간결하게 200자 이내로 정리해줘.
-       - [출처]: 매체명을 표시하고 원문 링크를 걸어줘.
-    3. 태그: 기사 내용과 관련된 핵심 키워드를 10개 이내로 추출해줘.
-
-    결과는 반드시 아래의 순수 JSON 리스트 형식으로만 응답해:
+    응답은 마크다운 없이 오직 순수 JSON 배열만 반환해:
     [
       {{
-        "title": "뉴스 제목",
-        "content": "HTML 형식의 상세 본문",
-        "tags": ["태그1", "태그2", ...],
-        "image_url": "이미지 주소 혹은 null"
+        "title": "...",
+        "content": "...",
+        "tags": ["...", "..."],
+        "image_url": "..."
       }}
     ]
 
@@ -141,18 +124,14 @@ def analyze_news_with_perplexity(news_list):
     data = {
         "model": "sonar",
         "messages": [
-            {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변합니다."},
+            {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 배열 형식으로만 답변합니다."},
             {"role": "user", "content": prompt}
         ]
     }
 
     try:
-        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=90)
-        res_json = response.json()
-        if 'choices' not in res_json:
-            print(f"API 응답 에러: {res_json}")
-            return []
-        content = res_json['choices'][0]['message']['content']
+        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=150)
+        content = response.json()['choices'][0]['message']['content'].strip()
         json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
         return json.loads(json_match.group()) if json_match else json.loads(content)
     except Exception as e:
@@ -205,8 +184,10 @@ def main():
         print("에러: 필수 환경 변수가 설정되지 않았습니다.")
         return
 
+    config = load_feeds_config()
     category_id = get_category_id("News")
-    news_list = get_rss_news()
+    
+    news_list = get_rss_news(config)
     if not news_list:
         print("최종적으로 수집된 뉴스가 없습니다.")
         return

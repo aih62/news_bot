@@ -1,0 +1,30 @@
+{
+    "direct_feeds": [
+        "https://feeds.feedburner.com/TheHackersNews",
+        "https://www.bleepingcomputer.com/feed/",
+        "https://krebsonsecurity.com/feed/",
+        "https://www.darkreading.com/rss.xml",
+        "https://feeds.feedburner.com/securityweek",
+        "https://therecord.media/feed/",
+        "https://www.scmagazine.com/feed",
+        "https://www.infosecurity-magazine.com/rss/news/",
+        "https://cyberscoop.com/feed/",
+        "https://www.wired.com/feed/category/security/latest/rss",
+        "https://www.zdnet.com/topic/security/rss.xml",
+        "https://techcrunch.com/category/security/feed/",
+        "https://feeds.arstechnica.com/arstechnica/security",
+        "https://www.techtarget.com/searchsecurity/rss/News-RSS-Feed.xml",
+        "https://www.csoonline.com/feed",
+        "https://www.govinfosecurity.com/rss-feeds",
+        "https://feeds.feedburner.com/eset/blog",
+        "https://feeds.washingtonpost.com/rss/business/technology",
+        "https://hackread.com/feed",
+        "https://rss.politico.com/cybersecurity.xml",
+        "https://dailysecu.com/rss/S1N1.xml",
+        "https://www.boannews.com/lib/news_rss.xml"
+    ],
+    "keywords": [
+        "사이버보안", "정보보안", "Cybersecurity", "Ransomware", 
+        "Vulnerability", "Malware", "Data breach", "Cyber attack"
+    ]
+}

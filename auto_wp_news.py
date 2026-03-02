@@ -60,7 +60,9 @@ def analyze_news_with_perplexity(news_list):
     if not news_list:
         return []
         
-    print(f"Perplexity AI 분석 중 ({len(news_list)}개 기사 중 10개 선정)...")
+    # 토큰 제한 및 분석 효율을 위해 최신순 상위 40개로 제한
+    limited_news = news_list[:40]
+    print(f"Perplexity AI 분석 중 ({len(news_list)}개 중 상위 {len(limited_news)}개 기사 분석)...")
     
     headers = {
         "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
@@ -99,7 +101,7 @@ def analyze_news_with_perplexity(news_list):
     ]
 
     대상 뉴스 리스트:
-    {json.dumps(news_list, ensure_ascii=False)}
+    {json.dumps(limited_news, ensure_ascii=False)}
     """
 
     data = {
@@ -111,14 +113,24 @@ def analyze_news_with_perplexity(news_list):
     }
 
     try:
-        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=60)
-        content = response.json()['choices'][0]['message']['content']
+        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=120)
+        
+        if response.status_code != 200:
+            print(f"API 에러 발생 (Status: {response.status_code}): {response.text}")
+            return []
+
+        resp_json = response.json()
+        if 'choices' not in resp_json:
+            print(f"응답 구조 이상: {resp_json}")
+            return []
+
+        content = resp_json['choices'][0]['message']['content']
         json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
         if json_match:
             return json.loads(json_match.group())
         return json.loads(content)
     except Exception as e:
-        print(f"AI 분석 실패: {e}")
+        print(f"AI 분석 중 예외 발생: {e}")
         return []
 
 def get_or_create_term(taxonomy, name):

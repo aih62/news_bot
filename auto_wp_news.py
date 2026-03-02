@@ -146,22 +146,29 @@ def analyze_news_with_perplexity(news_list):
             
     return []
 
+# 공통 헤더 (봇 차단 방지용)
+COMMON_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
+
 def get_or_create_term(taxonomy, name):
     """카테고리나 태그의 ID를 가져오거나 없으면 생성합니다."""
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/{taxonomy}"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
     try:
-        res = requests.get(endpoint, auth=auth, params={"search": name})
-        terms = res.json()
-        for term in terms:
-            if term['name'] == name:
-                return term['id']
-        res = requests.post(endpoint, auth=auth, json={"name": name})
+        res = requests.get(endpoint, auth=auth, params={"search": name}, headers=COMMON_HEADERS)
+        if res.status_code == 200:
+            terms = res.json()
+            for term in terms:
+                if term['name'] == name:
+                    return term['id']
+        
+        res = requests.post(endpoint, auth=auth, json={"name": name}, headers=COMMON_HEADERS)
         if res.status_code in [200, 201]:
             return res.json()['id']
-    except:
-        pass
+    except Exception as e:
+        print(f"Term 생성 중 오류 ({taxonomy}: {name}): {e}")
     return None
 
 def upload_media_from_url(image_url):
@@ -173,10 +180,11 @@ def upload_media_from_url(image_url):
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
     try:
-        img_res = requests.get(image_url, timeout=10)
+        img_res = requests.get(image_url, timeout=15, headers=COMMON_HEADERS)
         if img_res.status_code == 200:
             filename = f"news_img_{int(time.time())}.jpg"
             headers = {
+                **COMMON_HEADERS,
                 "Content-Disposition": f"attachment; filename={filename}",
                 "Content-Type": "image/jpeg"
             }
@@ -188,37 +196,47 @@ def upload_media_from_url(image_url):
             )
             if up_res.status_code in [200, 201]:
                 return up_res.json()['id']
+            else:
+                print(f"미디어 업로드 실패 응답: {up_res.text[:200]}")
     except Exception as e:
         print(f"이미지 업로드 실패: {e}")
     return None
 
 def post_to_wordpress(news_data):
     """뉴스를 워드프레스에 포스팅합니다."""
-    print(f"포스팅 중: {news_data['title']}")
+    print(f"포스팅 시도 중: {news_data['title']}")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
-    cat_id = get_or_create_term("categories", news_data['category'])
-    tag_ids = [get_or_create_term("tags", t) for t in news_data['tags']]
-    tag_ids = [tid for tid in tag_ids if tid]
-    
-    media_id = upload_media_from_url(news_data['image_url'])
-    
-    payload = {
-        "title": news_data['title'],
-        "content": f"{news_data['content']}<br><br><a href='{news_data['source_url']}' target='_blank'>원문 기사 읽기</a>",
-        "status": "publish",
-        "categories": [cat_id] if cat_id else [],
-        "tags": tag_ids,
-        "featured_media": media_id if media_id else 0
-    }
-    
-    res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload)
-    if res.status_code in [200, 201]:
-        post_info = res.json()
-        print(f"발행 성공! (ID: {post_info.get('id')})")
-        print(f"글 주소: {post_info.get('link')}")
-    else:
-        print(f"발행 실패: {res.text}")
+    try:
+        cat_id = get_or_create_term("categories", news_data['category'])
+        tag_ids = [get_or_create_term("tags", t) for t in news_data['tags']]
+        tag_ids = [tid for tid in tag_ids if tid]
+        
+        media_id = upload_media_from_url(news_data['image_url'])
+        
+        payload = {
+            "title": news_data['title'],
+            "content": f"{news_data['content']}<br><br><a href='{news_data['source_url']}' target='_blank'>원문 기사 읽기</a>",
+            "status": "publish",
+            "categories": [cat_id] if cat_id else [],
+            "tags": tag_ids,
+            "featured_media": media_id if media_id else 0
+        }
+        
+        res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, headers=COMMON_HEADERS)
+        
+        if res.status_code in [200, 201]:
+            try:
+                post_info = res.json()
+                print(f"발행 성공! (ID: {post_info.get('id')})")
+                print(f"글 주소: {post_info.get('link')}")
+            except Exception:
+                print(f"발행은 성공한 것으로 보이나 응답 해석 실패 (Status: {res.status_code})")
+        else:
+            print(f"발행 실패 (Status: {res.status_code}): {res.text[:300]}")
+            
+    except Exception as e:
+        print(f"포스팅 처리 중 예외 발생: {e}")
 
 def main():
     if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):

@@ -151,24 +151,43 @@ COMMON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
 
+# 전역 세션 객체 생성
+session = requests.Session()
+session.headers.update(COMMON_HEADERS)
+
+def init_session():
+    """Cafe24 스팸 쉴드 우회를 위해 메인 페이지에 접속하여 쿠키를 획득합니다."""
+    try:
+        print("세션 초기화: 메인 페이지 접속 중...")
+        res = session.get(WP_SITE_URL, timeout=10)
+        print(f"메인 페이지 접속 결과: {res.status_code}")
+        # 쿠키 확인 (디버깅용)
+        # print(f"Cookies: {session.cookies.get_dict()}")
+    except Exception as e:
+        print(f"세션 초기화 실패: {e}")
+
 def get_or_create_term(taxonomy, name):
     """카테고리나 태그의 ID를 가져오거나 없으면 생성합니다."""
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/{taxonomy}"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
     try:
-        res = requests.get(endpoint, auth=auth, params={"search": name}, headers=COMMON_HEADERS, timeout=20)
-        if res.status_code == 200 and res.text.strip():
-            terms = res.json()
-            for term in terms:
-                if term['name'] == name:
-                    return term['id']
+        res = session.get(endpoint, auth=auth, params={"search": name}, timeout=20)
+        if res.status_code == 200:
+            try:
+                terms = res.json()
+                for term in terms:
+                    if term['name'] == name:
+                        return term['id']
+            except:
+                pass # JSON 파싱 실패 시 무시
         
-        res = requests.post(endpoint, auth=auth, json={"name": name}, headers=COMMON_HEADERS, timeout=20)
-        if res.status_code in [200, 201] and res.text.strip():
-            return res.json()['id']
-        else:
-            print(f"Term 생성 응답 이상 ({taxonomy}: {name}): Status {res.status_code}, Body: {res.text[:100]}")
+        res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20)
+        if res.status_code in [200, 201]:
+            try:
+                return res.json()['id']
+            except:
+                pass
     except Exception as e:
         print(f"Term 생성 중 예외 ({taxonomy}: {name}): {e}")
     return None
@@ -182,25 +201,28 @@ def upload_media_from_url(image_url):
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
     try:
-        img_res = requests.get(image_url, timeout=20, headers=COMMON_HEADERS)
+        img_res = session.get(image_url, timeout=20)
         if img_res.status_code == 200:
             filename = f"news_img_{int(time.time())}.jpg"
             headers = {
-                **COMMON_HEADERS,
                 "Content-Disposition": f"attachment; filename={filename}",
                 "Content-Type": "image/jpeg"
             }
-            up_res = requests.post(
+            # 이미지 업로드 시에는 Content-Type이 덮어씌워지지 않도록 주의
+            # requests는 files 파라미터 사용 시 자동으로 헤더 설정하지만, 여기서는 raw data 전송
+            # session 헤더와 충돌 방지를 위해 별도 헤더 병합
+            upload_headers = session.headers.copy()
+            upload_headers.update(headers)
+            
+            up_res = session.post(
                 f"{WP_SITE_URL}/wp-json/wp/v2/media",
                 auth=auth,
-                headers=headers,
+                headers=upload_headers,
                 data=img_res.content,
                 timeout=30
             )
-            if up_res.status_code in [200, 201] and up_res.text.strip():
+            if up_res.status_code in [200, 201]:
                 return up_res.json()['id']
-            else:
-                print(f"미디어 업로드 실패 응답: Status {up_res.status_code}, Body: {up_res.text[:100]}")
     except Exception as e:
         print(f"이미지 업로드 중 예외: {e}")
     return None
@@ -210,7 +232,6 @@ def post_to_wordpress(news_data):
     print(f"--- 포스팅 시도: {news_data['title']} ---")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
-    # 카테고리/태그가 없어도 글은 올라가야 함
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
     tag_ids = []
     for t in news_data.get('tags', []):
@@ -229,7 +250,7 @@ def post_to_wordpress(news_data):
     }
     
     try:
-        res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, headers=COMMON_HEADERS, timeout=30)
+        res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30)
         
         if res.status_code in [200, 201]:
             if res.text.strip():
@@ -251,6 +272,9 @@ def main():
     if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):
         print("에러: 환경 변수(API Key, WP 로그인 정보)가 설정되지 않았습니다.")
         return
+
+    # 세션 초기화 (쿠키 획득)
+    init_session()
 
     news_list = get_rss_news()
     selected_news = analyze_news_with_perplexity(news_list)

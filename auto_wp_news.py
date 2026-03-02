@@ -105,7 +105,7 @@ def analyze_news_with_perplexity(news_list):
     """
 
     data = {
-        "model": "sonar-reasoning",
+        "model": "sonar",
         "messages": [
             {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변합니다."},
             {"role": "user", "content": prompt}

@@ -11,7 +11,12 @@ from urllib.parse import quote
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 WP_USERNAME = os.getenv("WP_USERNAME")
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
-WP_SITE_URL = os.getenv("WP_SITE_URL", "https://ajken.mycafe24.com")
+
+# WP_SITE_URL이 비어있거나 None인 경우를 대비한 처리
+WP_SITE_URL = os.getenv("WP_SITE_URL")
+if not WP_SITE_URL:
+    WP_SITE_URL = "https://ajken.mycafe24.com"
+WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
 def get_rss_news():
     """feeds.json에서 키워드를 읽어와 구글 뉴스 RSS에서 최신 기사 목록을 가져옵니다."""

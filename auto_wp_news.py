@@ -112,26 +112,34 @@ def analyze_news_with_perplexity(news_list):
         ]
     }
 
-    try:
-        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=120)
-        
-        if response.status_code != 200:
-            print(f"API 에러 발생 (Status: {response.status_code}): {response.text}")
-            return []
+    # 재시도 로직 추가 (최대 2회)
+    for attempt in range(2):
+        try:
+            print(f"AI 분석 시도 {attempt + 1}/2...")
+            response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=300)
+            
+            if response.status_code != 200:
+                print(f"API 에러 발생 (Status: {response.status_code}): {response.text}")
+                continue
 
-        resp_json = response.json()
-        if 'choices' not in resp_json:
-            print(f"응답 구조 이상: {resp_json}")
-            return []
+            resp_json = response.json()
+            if 'choices' not in resp_json:
+                print(f"응답 구조 이상: {resp_json}")
+                continue
 
-        content = resp_json['choices'][0]['message']['content']
-        json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
-        if json_match:
-            return json.loads(json_match.group())
-        return json.loads(content)
-    except Exception as e:
-        print(f"AI 분석 중 예외 발생: {e}")
-        return []
+            content = resp_json['choices'][0]['message']['content']
+            json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
+            if json_match:
+                return json.loads(json_match.group())
+            return json.loads(content)
+            
+        except requests.exceptions.Timeout:
+            print(f"AI 분석 시간 초과 (300초). 재시도 중...")
+        except Exception as e:
+            print(f"AI 분석 중 예외 발생: {e}")
+            break
+            
+    return []
 
 def get_or_create_term(taxonomy, name):
     """카테고리나 태그의 ID를 가져오거나 없으면 생성합니다."""

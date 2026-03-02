@@ -214,7 +214,9 @@ def post_to_wordpress(news_data):
     
     res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload)
     if res.status_code in [200, 201]:
-        print("발행 성공!")
+        post_info = res.json()
+        print(f"발행 성공! (ID: {post_info.get('id')})")
+        print(f"글 주소: {post_info.get('link')}")
     else:
         print(f"발행 실패: {res.text}")
 

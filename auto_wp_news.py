@@ -5,19 +5,17 @@ import re
 from requests.auth import HTTPBasicAuth
 import time
 import os
+from urllib.parse import quote
 
 # ================= CONFIGURATION (환경 변수 설정) =================
-# GitHub Secrets에 등록한 값을 자동으로 읽어옵니다.
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 WP_USERNAME = os.getenv("WP_USERNAME")
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
-
-# 본인의 워드프레스 주소 (수정 필요 시 여기서 변경)
 WP_SITE_URL = os.getenv("WP_SITE_URL", "https://ajken.mycafe24.com")
 
-# 뉴스 검색 키워드 및 RSS URL (영문 키워드 추가 및 검색 범위 확장)
 def get_rss_news():
     """feeds.json에서 키워드를 읽어와 구글 뉴스 RSS에서 최신 기사 목록을 가져옵니다."""
+    print(f"현재 작업 디렉토리: {os.getcwd()}")
     print("feeds.json 로드 중...")
     try:
         with open("feeds.json", "r", encoding="utf-8") as f:
@@ -31,14 +29,16 @@ def get_rss_news():
     seen_links = set()
 
     for category_name, keywords in categories.items():
-        # 키워드들을 OR로 묶어서 검색 쿼리 생성
+        # 키워드들을 OR로 묶어서 검색 쿼리 생성 및 인코딩
         query = " OR ".join([f'"{k}"' if " " in k else k for k in keywords])
-        rss_url = f"https://news.google.com/rss/search?q={query}&hl=ko&gl=KR&ceid=KR:ko"
+        encoded_query = quote(query)
+        rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
         
-        print(f"[{category_name}] RSS 피드 읽는 중...")
+        print(f"[{category_name}] RSS 검색 중: {rss_url[:100]}...")
         try:
             feed = feedparser.parse(rss_url)
-            for entry in feed.entries[:20]: # 카테고리당 최대 20개
+            count = 0
+            for entry in feed.entries[:20]:
                 if entry.link not in seen_links:
                     all_entries.append({
                         "title": entry.title,
@@ -47,8 +47,10 @@ def get_rss_news():
                         "search_category": category_name
                     })
                     seen_links.add(entry.link)
+                    count += 1
+            print(f"  -> {count}개 기사 발견")
         except Exception as e:
-            print(f"[{category_name}] 읽기 실패: {e}")
+            print(f"  -> [{category_name}] 읽기 실패: {e}")
             
     print(f"총 {len(all_entries)}개의 고유 기사 수집 완료.")
     return all_entries

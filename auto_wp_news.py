@@ -248,7 +248,7 @@ def post_to_wordpress(news_data):
     
     payload = {
         "title": news_data['title'],
-        "content": f"{news_data['content']}<br><br><a href='{news_data['source_url']}' target='_blank'>원문 기사 읽기</a>",
+        "content": news_data['content'],
         "status": "publish",
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids,

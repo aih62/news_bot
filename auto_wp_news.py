@@ -10,6 +10,8 @@ from urllib.parse import quote
 # ================= CONFIGURATION (환경 변수 설정) =================
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 WP_USERNAME = os.getenv("WP_USERNAME")
+if not WP_USERNAME:
+    WP_USERNAME = "inhoe.an@gmail.com" # 성공 확인된 계정명
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
 
 # WP_SITE_URL이 비어있거나 None인 경우를 대비한 처리
@@ -19,13 +21,14 @@ if not WP_SITE_URL:
 WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
 def get_rss_news():
-    """feeds.json에서 키워드를 읽어와 구글 뉴스 RSS에서 최신 기사 목록을 가져옵니다."""
+    """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다."""
     print(f"현재 작업 디렉토리: {os.getcwd()}")
     print("feeds.json 로드 중...")
     try:
         with open("feeds.json", "r", encoding="utf-8") as f:
             config = json.load(f)
-            categories = config.get("keywords", {})
+            direct_feeds = config.get("direct_feeds", {})
+            search_categories = config.get("search_categories", {})
     except Exception as e:
         print(f"feeds.json 로드 실패: {e}")
         return []
@@ -33,22 +36,43 @@ def get_rss_news():
     all_entries = []
     seen_links = set()
 
-    for category_name, keywords in categories.items():
+    # 1. 보안 전문 매체 직접 RSS 파싱 (최신 실전 정보)
+    for source_name, rss_url in direct_feeds.items():
+        print(f"[{source_name}] 직접 RSS 수집 중...")
+        try:
+            feed = feedparser.parse(rss_url)
+            count = 0
+            for entry in feed.entries[:15]:
+                if entry.link not in seen_links:
+                    all_entries.append({
+                        "title": entry.title,
+                        "link": entry.link,
+                        "published": getattr(entry, 'published', time.ctime()),
+                        "search_category": f"Expert_{source_name}"
+                    })
+                    seen_links.add(entry.link)
+                    count += 1
+            print(f"  -> {count}개 기사 발견")
+        except Exception as e:
+            print(f"  -> [{source_name}] 읽기 실패: {e}")
+
+    # 2. 구글 뉴스 키워드 검색 (광범위한 검색)
+    for category_name, keywords in search_categories.items():
         # 키워드들을 OR로 묶어서 검색 쿼리 생성 및 인코딩
         query = " OR ".join([f'"{k}"' if " " in k else k for k in keywords])
         encoded_query = quote(query)
         rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
         
-        print(f"[{category_name}] RSS 검색 중: {rss_url[:100]}...")
+        print(f"[{category_name}] 구글 뉴스 검색 중...")
         try:
             feed = feedparser.parse(rss_url)
             count = 0
-            for entry in feed.entries[:20]:
+            for entry in feed.entries[:15]:
                 if entry.link not in seen_links:
                     all_entries.append({
                         "title": entry.title,
                         "link": entry.link,
-                        "published": entry.published,
+                        "published": getattr(entry, 'published', time.ctime()),
                         "search_category": category_name
                     })
                     seen_links.add(entry.link)
@@ -223,7 +247,7 @@ def get_or_create_term(taxonomy, name):
                     if term['name'] == name:
                         return term['id']
             except:
-                pass # JSON 파싱 실패 시 무시
+                pass 
         
         res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20)
         if res.status_code in [200, 201]:
@@ -240,34 +264,50 @@ def upload_media_from_url(image_url):
     if not image_url or not image_url.startswith("http"):
         return None
         
-    print(f"이미지 업로드 시도: {image_url[:50]}...")
+    print(f"이미지 업로드 시도: {image_url[:60]}...")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
     try:
+        # 이미지 다운로드
         img_res = session.get(image_url, timeout=20)
-        if img_res.status_code == 200:
-            filename = f"news_img_{int(time.time())}.jpg"
-            headers = {
-                "Content-Disposition": f"attachment; filename={filename}",
-                "Content-Type": "image/jpeg"
-            }
-            # 이미지 업로드 시에는 Content-Type이 덮어씌워지지 않도록 주의
-            # requests는 files 파라미터 사용 시 자동으로 헤더 설정하지만, 여기서는 raw data 전송
-            # session 헤더와 충돌 방지를 위해 별도 헤더 병합
-            upload_headers = session.headers.copy()
-            upload_headers.update(headers)
+        if img_res.status_code != 200:
+            print(f"이미지 다운로드 실패 (Status: {img_res.status_code})")
+            return None
+
+        # Content-Type 감지 및 확장자 결정
+        content_type = img_res.headers.get('Content-Type', 'image/jpeg')
+        ext = "jpg"
+        if "png" in content_type: ext = "png"
+        elif "webp" in content_type: ext = "webp"
+        elif "gif" in content_type: ext = "gif"
+        
+        filename = f"news_img_{int(time.time())}.{ext}"
+        
+        # 업로드용 헤더 구성
+        upload_headers = session.headers.copy()
+        upload_headers.update({
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": content_type
+        })
+        
+        # Raw 데이터 전송 (성공 확률 높음)
+        up_res = session.post(
+            f"{WP_SITE_URL}/wp-json/wp/v2/media",
+            auth=auth,
+            headers=upload_headers,
+            data=img_res.content,
+            timeout=30
+        )
+        
+        if up_res.status_code in [200, 201]:
+            media_id = up_res.json().get('id')
+            print(f"미디어 업로드 성공! ID: {media_id}")
+            return media_id
+        else:
+            print(f"미디어 업로드 실패 (Status: {up_res.status_code}): {up_res.text[:200]}")
             
-            up_res = session.post(
-                f"{WP_SITE_URL}/wp-json/wp/v2/media",
-                auth=auth,
-                headers=upload_headers,
-                data=img_res.content,
-                timeout=30
-            )
-            if up_res.status_code in [200, 201]:
-                return up_res.json()['id']
     except Exception as e:
-        print(f"이미지 업로드 중 예외: {e}")
+        print(f"이미지 처리 중 예외 발생: {e}")
     return None
 
 def post_to_wordpress(news_data):
@@ -283,7 +323,11 @@ def post_to_wordpress(news_data):
     
     # 이미지 업로드 및 미디어 ID 획득
     image_url = news_data.get('image_url')
-    media_id = upload_media_from_url(image_url) if image_url else None
+    media_id = None
+    try:
+        media_id = upload_media_from_url(image_url) if image_url else None
+    except:
+        print("이미지 업로드 중 오류가 발생했으나 포스팅을 계속합니다.")
     
     payload = {
         "title": news_data['title'],
@@ -316,6 +360,33 @@ def post_to_wordpress(news_data):
             
     except Exception as e:
         print(f"포스팅 요청 중 예외 발생: {e}")
+
+def main():
+    if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):
+        print("에러: 환경 변수(API Key, WP 로그인 정보)가 설정되지 않았습니다.")
+        return
+
+    # 세션 초기화 (쿠키 획득)
+    init_session()
+
+    news_list = get_rss_news()
+    selected_news = analyze_news_with_perplexity(news_list)
+    
+    if not selected_news:
+        print("선정된 뉴스가 없습니다.")
+        return
+
+    for news in selected_news:
+        try:
+            post_to_wordpress(news)
+            print("다음 포스팅을 위해 5초 대기...")
+            time.sleep(5)
+        except Exception as e:
+            print(f"처리 중 오류: {e}")
+
+if __name__ == "__main__":
+    main()
+
 
 def main():
     if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):

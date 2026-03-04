@@ -1,23 +1,28 @@
 {
-  "keywords": {
-    "국제규제_비교분석": [
-      "CRA", "EU Cyber Resilience Act", "NIS2", "DORA",
-      "SEC Cybersecurity Disclosure", "NIST CSF 2.0",
-      "Privacy Law", "GDPR enforcement", "US CIRCIA"
+  "direct_feeds": {
+    "TheHackerNews": "https://feeds.feedburner.com/TheHackersNews",
+    "BleepingComputer": "https://www.bleepingcomputer.com/feed/",
+    "DarkReading": "https://www.darkreading.com/rss.xml",
+    "KrebsOnSecurity": "https://krebsonsecurity.com/feed/",
+    "SchneierOnSecurity": "https://www.schneier.com/blog/feed/",
+    "Threatpost": "https://threatpost.com/feed/",
+    "WiredSecurity": "https://www.wired.com/feed/category/security/latest/rss"
+  },
+  "search_categories": {
+    "AI_및_신기술_보안": [
+      "AI Security", "LLM Security", "Prompt Injection", "AI Jailbreak",
+      "Adversarial Machine Learning", "Model Poisoning", "OWASP Top 10 for LLM",
+      "NIST AI RMF", "AI Red Teaming", "Deepfake Security", "Agentic AI Security"
     ],
-    "기술_위협_트렌드": [
-      "Ransomware", "Zero-day", "Supply Chain Attack", "Living off the Land",
-      "AI Security", "AI-powered attack", "Deepfake fraud",
-      "Quantum-safe", "Post-Quantum Cryptography", "Zero Trust"
+    "글로벌_규제_및_공급망": [
+      "EU AI Act", "CRA", "EU Cyber Resilience Act", "NIS2", "DORA",
+      "SEC Cybersecurity Disclosure", "NIST CSF 2.0", "US CIRCIA",
+      "SBOM", "Software Bill of Materials", "Data Sovereignty"
     ],
-    "산업_인프라_보안": [
-      "OT Security", "ICS", "SCADA", "Critical Infrastructure",
-      "Automotive Cybersecurity", "IoT Security", "Cloud Security",
-      "Financial Security", "Healthcare Cybersecurity"
-    ],
-    "침해사고_취약점": [
-      "Data breach", "Cyber attack", "Vulnerability", "Malware",
-      "APT", "Social Engineering", "Phishing", "CVE"
+    "클라우드_및_인프라": [
+      "Cloud Native Security", "CNAPP", "OT Security", "ICS", "SCADA",
+      "Critical Infrastructure Protection", "Zero Trust Architecture",
+      "ITDR", "Identity Threat Detection", "API Security"
     ]
   }
 }

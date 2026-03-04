@@ -135,11 +135,12 @@ def analyze_news_with_perplexity(news_list):
     [출처]
     <p>출처: <a href='URL' target='_blank'>매체명</a></p>
 
-    결과는 반드시 아래의 순수 JSON 리스트 형식으로만 응답해 (설명 없이 JSON만):
+    결과는 반드시 아래의 순수 JSON 리스트 형식으로만 응답해 (설명 없이 JSON만).
+    특히 **"content" 필드 안에는 <h3>, <ul>, <blockquote>, <p>(출처) 태그가 순서대로 모두 포함된 전체 HTML 본문**을 넣어야 함:
     [
       {{
         "title": "뉴스 제목",
-        "content": "HTML 구조가 포함된 본문 전체 내용",
+        "content": "<h3>서브헤드라인</h3><ul><li>요약내용</li>...</ul><blockquote>전문가코멘트</blockquote><p>출처: <a href='URL' target='_blank'>매체명</a></p>",
         "category": "News",
         "tags": ["태그1", "태그2", "태그3"],
         "image_url": "대표 이미지 주소 혹은 null",
@@ -280,8 +281,9 @@ def post_to_wordpress(news_data):
         tid = get_or_create_term("tags", t)
         if tid: tag_ids.append(tid)
     
-    # 미디어 업로드 대신 플러그인 연동용 메타데이터 사용
+    # 이미지 URL이 있으면 워드프레스 미디어 라이브러리에 업로드 후 ID 획득
     image_url = news_data.get('image_url')
+    media_id = upload_media_from_url(image_url)
     
     payload = {
         "title": news_data['title'],
@@ -289,9 +291,7 @@ def post_to_wordpress(news_data):
         "status": "publish",
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids,
-        "meta": {
-            "_featured_image_url": image_url if image_url else ""
-        }
+        "featured_media": media_id if media_id else 0  # 대표 이미지 ID 설정
     }
     
     try:

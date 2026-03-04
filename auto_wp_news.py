@@ -5,6 +5,7 @@ import re
 from requests.auth import HTTPBasicAuth
 import time
 import os
+import html
 from urllib.parse import quote, urljoin
 
 # ================= CONFIGURATION (환경 변수 설정) =================
@@ -30,6 +31,24 @@ COMMON_HEADERS = {
 session = requests.Session()
 session.headers.update(COMMON_HEADERS)
 
+def get_recent_post_titles():
+    """워드프레스에서 최근 포스팅된 10개의 제목을 가져옵니다."""
+    print("최근 포스팅된 뉴스 제목 확인 중...")
+    endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
+    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
+    params = {"per_page": 10, "status": "publish"}
+    try:
+        res = session.get(endpoint, auth=auth, params=params, timeout=20)
+        if res.status_code == 200:
+            posts = res.json()
+            # HTML 엔티티 복원 (예: &#8211; -> -)
+            titles = [html.unescape(post['title']['rendered']) for post in posts]
+            print(f"  -> 최근 {len(titles)}개 포스트 제목 로드 완료.")
+            return titles
+    except Exception as e:
+        print(f"최근 포스트 제목 가져오기 실패: {e}")
+    return []
+
 def get_image_from_webpage(url):
     """기사 원본 주소에서 og:image 태그를 추출합니다."""
     if not url or not url.startswith("http"):
@@ -38,10 +57,10 @@ def get_image_from_webpage(url):
     try:
         res = requests.get(url, timeout=10, headers=COMMON_HEADERS)
         if res.status_code == 200:
-            html = res.text
-            match = re.search(r'<meta [^>]*property=["\']og:image["\'] [^>]*content=["\']([^"\']+)["\']', html)
+            html_content = res.text
+            match = re.search(r'<meta [^>]*property=["\']og:image["\'] [^>]*content=["\']([^"\']+)["\']', html_content)
             if not match:
-                match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*property=["\']og:image["\']', html)
+                match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*property=["\']og:image["\']', html_content)
             if match:
                 img_url = match.group(1)
                 if img_url.startswith('/'):
@@ -54,7 +73,6 @@ def get_image_from_webpage(url):
 
 def get_rss_news():
     """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다."""
-    print(f"현재 작업 디렉토리: {os.getcwd()}")
     print("feeds.json 로드 중...")
     try:
         with open("feeds.json", "r", encoding="utf-8") as f:
@@ -121,8 +139,8 @@ def get_rss_news():
     print(f"총 {len(all_entries)}개의 고유 기사 수집 완료.")
     return all_entries
 
-def analyze_news_with_perplexity(news_list):
-    """Perplexity AI를 사용하여 최상급 품질의 뉴스 분석을 수행합니다 (NIST 예시 포함)."""
+def analyze_news_with_perplexity(news_list, recent_titles):
+    """Perplexity AI를 사용하여 중복되지 않는 최상급 품질의 뉴스 분석을 수행합니다."""
     if not news_list:
         return []
         
@@ -139,6 +157,11 @@ def analyze_news_with_perplexity(news_list):
 
     다음은 주어진 뉴스 리스트 중에서 **글로벌(해외) 보안 뉴스 상위 10개**를 선정해
     한국 정부 정책 담당자가 빠르게 동향을 파악할 수 있도록 뉴스의 핵심사항을 요약해야 하는 작업이다.
+
+    **※ 중복 방지 주의사항:**
+    다음 리스트는 이미 워드프레스에 포스팅된 최신 뉴스 제목들이다:
+    {json.dumps(recent_titles, ensure_ascii=False)}
+    **위 리스트에 포함된 제목과 동일하거나, 아주 유사한 사건을 다루는 뉴스는 절대 이번 선정 대상에 포함하지 말 것.**
 
     **※ 주의: 한국 국내 뉴스나 정책은 선정에서 제외하고, 철저히 글로벌 동향 및 국제 규제 위주로 선정할 것.**
 
@@ -271,7 +294,7 @@ def post_to_wordpress(news_data, original_news_list):
     print(f"--- 포스팅 시도: {news_data['title']} ---")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
-    # 1. 실제 이미지 주소 결정 (RSS -> 웹 스크래핑 -> AI -> 디폴트 순)
+    # 1. 실제 이미지 주소 결정
     target_image = None
     source_url = news_data.get('source_url')
     for item in original_news_list:
@@ -296,7 +319,6 @@ def post_to_wordpress(news_data, original_news_list):
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
     tag_ids = [tid for tid in tag_ids if tid]
     
-    # 3. 포스팅 페이로드 (Ele뉴스 최적화: 본문 이미지 삽입 제거)
     payload = {
         "title": news_data['title'],
         "content": news_data.get('content', '내용 없음'),
@@ -320,9 +342,20 @@ def post_to_wordpress(news_data, original_news_list):
 def main():
     if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]): return
     init_session()
+    
+    # 1. 최근 포스팅된 10개 제목 가져오기
+    recent_titles = get_recent_post_titles()
+    
+    # 2. 뉴스 수집
     news_list = get_rss_news()
-    selected_news = analyze_news_with_perplexity(news_list)
-    if not selected_news: return
+    
+    # 3. AI 분석 (중복 제목 리스트 전달)
+    selected_news = analyze_news_with_perplexity(news_list, recent_titles)
+    
+    if not selected_news:
+        print("선정된 뉴스가 없습니다.")
+        return
+        
     for news in selected_news:
         try:
             post_to_wordpress(news, news_list)

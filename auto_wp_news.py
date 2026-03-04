@@ -5,7 +5,7 @@ import re
 from requests.auth import HTTPBasicAuth
 import time
 import os
-from urllib.parse import quote
+from urllib.parse import quote, urljoin
 
 # ================= CONFIGURATION (환경 변수 설정) =================
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
@@ -22,6 +22,38 @@ WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
 # 기본 이미지 URL (이미지가 없을 때 사용)
 DEFAULT_IMAGE_URL = "http://ajken.mycafe24.com/wp-content/uploads/2026/03/thedigitalartist-security-4868167_1920.jpg"
+
+# 공통 헤더
+COMMON_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+}
+session = requests.Session()
+session.headers.update(COMMON_HEADERS)
+
+def get_image_from_webpage(url):
+    """기사 원본 주소에서 og:image 태그를 추출합니다."""
+    if not url or not url.startswith("http"):
+        return None
+    print(f"원본 페이지에서 이미지 추출 중: {url[:60]}...")
+    try:
+        res = requests.get(url, timeout=10, headers=COMMON_HEADERS)
+        if res.status_code == 200:
+            html = res.text
+            # og:image 패턴 검색
+            match = re.search(r'<meta [^>]*property=["\']og:image["\'] [^>]*content=["\']([^"\']+)["\']', html)
+            if not match:
+                match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*property=["\']og:image["\']', html)
+            
+            if match:
+                img_url = match.group(1)
+                # 상대 경로인 경우 절대 경로로 변환
+                if img_url.startswith('/'):
+                    img_url = urljoin(url, img_url)
+                print(f"  -> 추출 성공: {img_url[:60]}...")
+                return img_url
+    except Exception as e:
+        print(f"  -> 추출 실패: {e}")
+    return None
 
 def get_rss_news():
     """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다."""
@@ -121,10 +153,6 @@ def analyze_news_with_perplexity(news_list):
       }}
     ]
 
-    [작성 규칙]
-    - "content" 필드에는 반드시 <h3>, <ul>, <li>, <blockquote>, <p> 태그를 사용해 HTML 형식으로 작성할 것.
-    - 한국 국내 뉴스는 제외하고 철저히 글로벌 동향 위주로 선정할 것.
-
     대상 뉴스 리스트:
     {json.dumps(limited_news, ensure_ascii=False)}
     """
@@ -132,7 +160,7 @@ def analyze_news_with_perplexity(news_list):
     data = {
         "model": "sonar",
         "messages": [
-            {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 'content' 필드를 포함한 JSON 형식으로만 답변합니다."},
+            {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변합니다."},
             {"role": "user", "content": prompt}
         ]
     }
@@ -147,10 +175,6 @@ def analyze_news_with_perplexity(news_list):
         except Exception as e:
             print(f"AI 분석 중 예외: {e}")
     return []
-
-COMMON_HEADERS = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-session = requests.Session()
-session.headers.update(COMMON_HEADERS)
 
 def init_session():
     try:
@@ -172,34 +196,55 @@ def get_or_create_term(taxonomy, name):
     return None
 
 def upload_media_from_url(image_url):
-    if not image_url or not image_url.startswith("http"): return None
+    """이미지를 워드프레스에 업로드하고 ID를 반환합니다."""
+    if not image_url or not image_url.startswith("http"):
+        return None
     print(f"이미지 업로드 시도: {image_url[:60]}...")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
         img_res = session.get(image_url, timeout=20)
         if img_res.status_code != 200: return None
         content_type = img_res.headers.get('Content-Type', 'image/jpeg')
-        filename = f"news_img_{int(time.time())}.{'png' if 'png' in content_type else 'jpg'}"
-        headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
-        up_res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=30)
-        if up_res.status_code in [200, 201]: return up_res.json().get('id')
+        ext = "png" if "png" in content_type else "jpg"
+        filename = f"news_img_{int(time.time())}.{ext}"
+        upload_headers = session.headers.copy()
+        upload_headers.update({"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type})
+        up_res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=upload_headers, data=img_res.content, timeout=30)
+        if up_res.status_code in [200, 201]:
+            return up_res.json().get('id')
     except: pass
     return None
 
 def post_to_wordpress(news_data, original_news_list):
+    """뉴스를 워드프레스에 포스팅합니다."""
     print(f"--- 포스팅 시도: {news_data['title']} ---")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
+    # 1. 실제 이미지 주소 결정 로직 강화
     target_image = None
-    for item in original_news_list:
-        if item['link'] == news_data.get('source_url') and item.get('rss_image'):
-            target_image = item['rss_image']
-            break
-    if not target_image: target_image = news_data.get('image_url')
+    source_url = news_data.get('source_url')
 
+    # [1순위] RSS 원본 이미지
+    for item in original_news_list:
+        if item['link'] == source_url and item.get('rss_image'):
+            target_image = item['rss_image']
+            print("  -> RSS 피드에서 실제 이미지를 찾았습니다.")
+            break
+    
+    # [2순위] 기사 원본 페이지 스크래핑 (og:image)
+    if not target_image:
+        target_image = get_image_from_webpage(source_url)
+    
+    # [3순위] AI 추천 URL
+    if not target_image:
+        target_image = news_data.get('image_url')
+
+    # 2. 이미지 업로드 시도
     media_id = upload_media_from_url(target_image)
+    
+    # [최후의 수단] 이미지 실패 시 기본 이미지 사용
     if not media_id:
-        print("이미지 업로드 실패 또는 주소 없음. 기본 이미지를 사용합니다.")
+        print("  -> 실제 이미지 없음 또는 업로드 실패. 기본 이미지를 사용합니다.")
         media_id = upload_media_from_url(DEFAULT_IMAGE_URL)
 
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
@@ -208,32 +253,42 @@ def post_to_wordpress(news_data, original_news_list):
     
     payload = {
         "title": news_data['title'],
-        "content": news_data.get('content', '내용 없음'),
+        "content": news_data['content'],
         "status": "publish",
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids,
         "featured_media": media_id if media_id else 0,
-        "meta": {"fifu_image_url": target_image or DEFAULT_IMAGE_URL}
+        "meta": {
+            "fifu_image_url": target_image or DEFAULT_IMAGE_URL,
+            "_featured_image_url": target_image or DEFAULT_IMAGE_URL
+        }
     }
     
     try:
         res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30)
         if res.status_code in [200, 201]:
             print(f"발행 성공! (ID: {res.json().get('id')})")
-        else: print(f"발행 실패: {res.status_code}")
-    except Exception as e: print(f"포스팅 예외: {e}")
+        else:
+            print(f"발행 실패: {res.status_code}")
+    except Exception as e:
+        print(f"포스팅 예외: {e}")
 
 def main():
-    if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]): return
+    if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):
+        print("에러: 환경 변수 설정 누락")
+        return
     init_session()
     news_list = get_rss_news()
     selected_news = analyze_news_with_perplexity(news_list)
-    if not selected_news: return
+    if not selected_news:
+        print("선정된 뉴스가 없습니다.")
+        return
     for news in selected_news:
         try:
             post_to_wordpress(news, news_list)
             time.sleep(5)
-        except Exception as e: print(f"처리 중 오류: {e}")
+        except Exception as e:
+            print(f"처리 중 오류: {e}")
 
 if __name__ == "__main__":
     main()

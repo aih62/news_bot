@@ -143,7 +143,7 @@ def analyze_news_with_perplexity(news_list):
         "content": "<h3>서브헤드라인</h3><ul><li>요약내용</li>...</ul><blockquote>전문가코멘트</blockquote><p>출처: <a href='URL' target='_blank'>매체명</a></p>",
         "category": "News",
         "tags": ["태그1", "태그2", "태그3"],
-        "image_url": "대표 이미지 주소 혹은 null",
+        "image_url": "기사 관련 이미지 URL. 만약 직접적인 이미지가 없다면, 뉴스 본문에서 다루는 주요 기관의 로고나 해당 보안 기술을 상징하는 공개된 고품질 이미지 URL을 검색하여 반드시 제공할 것.",
         "source_url": "원본 링크"
       }}
     ]

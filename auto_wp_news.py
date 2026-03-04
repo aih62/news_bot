@@ -143,7 +143,7 @@ def analyze_news_with_perplexity(news_list):
         "content": "<h3>서브헤드라인</h3><ul><li>요약내용</li>...</ul><blockquote>전문가코멘트</blockquote><p>출처: <a href='URL' target='_blank'>매체명</a></p>",
         "category": "News",
         "tags": ["태그1", "태그2", "태그3"],
-        "image_url": "기사 관련 이미지 URL. 만약 직접적인 이미지가 없다면, 뉴스 본문에서 다루는 주요 기관의 로고나 해당 보안 기술을 상징하는 공개된 고품질 이미지 URL을 검색하여 반드시 제공할 것.",
+        "image_url": "반드시 .jpg, .png, .webp 등으로 끝나는 직접적인 이미지 파일의 절대 경로 URL을 제공할 것. 기사 내 이미지가 없다면 관련 기관 로고나 기술 상징 이미지를 검색하여 넣을 것.",
         "source_url": "원본 링크"
       }}
     ]
@@ -281,9 +281,9 @@ def post_to_wordpress(news_data):
         tid = get_or_create_term("tags", t)
         if tid: tag_ids.append(tid)
     
-    # 이미지 URL이 있으면 워드프레스 미디어 라이브러리에 업로드 후 ID 획득
+    # 이미지 업로드 및 미디어 ID 획득
     image_url = news_data.get('image_url')
-    media_id = upload_media_from_url(image_url)
+    media_id = upload_media_from_url(image_url) if image_url else None
     
     payload = {
         "title": news_data['title'],
@@ -291,7 +291,11 @@ def post_to_wordpress(news_data):
         "status": "publish",
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids,
-        "featured_media": media_id if media_id else 0  # 대표 이미지 ID 설정
+        "featured_media": media_id if media_id else 0,
+        "meta": {
+            "fifu_image_url": image_url if image_url else "",
+            "_featured_image_url": image_url if image_url else ""
+        }
     }
     
     try:

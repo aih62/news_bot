@@ -2,8 +2,8 @@ name: Daily Security News Update
 
 on:
   schedule:
-    # 매일 한국 시간 오전 8시 (UTC 23:00)에 실행
-    - cron: '0 23 * * *'
+    # 매일 한국 시간 오전 7시 (UTC 22:00)에 실행
+    - cron: '0 22 * * *'
   push:
     branches:
       - main

@@ -86,24 +86,36 @@ async def generate_notebooklm_podcast(source_text):
             # 소스가 인덱싱될 시간을 충분히 확보해야 RPC CREATE_ARTIFACT 실패 에러를 방지할 수 있습니다.
             print("소스가 인덱싱될 때까지 15초 대기...")
             await asyncio.sleep(15)
+            # GitHub Actions 환경은 로컬보다 네트워크/처리 지연이 있을 수 있어 30초로 늘립니다.
+            print("소스가 인덱싱될 때까지 30초 대기...")
+            await asyncio.sleep(30)
             
-            # 3. 오디오 오버뷰 (팟캐스트) 생성 요청
-            print("팟캐스트(Audio Overview) 생성 요청...")
-            
-            prompt_instructions = (
-                "제공된 10개의 최신 글로벌 보안 뉴스를 바탕으로 단일 팟캐스트 에피소드를 만들어 주세요. "
-                "뉴스 10개를 각각 따로 읽는 것이 아니라, 전체적인 동향과 가장 중요한 이슈들을 하나로 엮어서 "
-                "한국어로 자연스럽게 대화하며 소개해야 합니다. "
-                "전체적인 분량은 20분을 넘지 않도록 간결하게 구성해 주세요."
-            )
-            
-            audio_job = await client.artifacts.generate_audio(
-                notebook.id,
-                language="ko",
-                audio_length=AudioLength.SHORT,
-                instructions=prompt_instructions
-            )
-            
+            # 3. 오디오 오버뷰 (팟캐스트) 생성 요청 (실패 시 최대 2회 재시도)
+            audio_job = None
+            for attempt in range(2):
+                try:
+                    print(f"팟캐스트(Audio Overview) 생성 요청 중 (시도 {attempt + 1}/2)...")
+                    prompt_instructions = (
+                        "제공된 10개의 최신 글로벌 보안 뉴스를 바탕으로 단일 팟캐스트 에피소드를 만들어 주세요. "
+                        "뉴스 10개를 각각 따로 읽는 것이 아니라, 전체적인 동향과 가장 중요한 이슈들을 하나로 엮어서 "
+                        "한국어로 자연스럽게 대화하며 소개해야 합니다. "
+                        "전체적인 분량은 20분을 넘지 않도록 간결하게 구성해 주세요."
+                    )
+                    audio_job = await client.artifacts.generate_audio(
+                        notebook.id,
+                        language="ko",
+                        audio_length=AudioLength.SHORT,
+                        instructions=prompt_instructions
+                    )
+                    break
+                except Exception as e:
+                    print(f"생성 요청 실패: {e}")
+                    if attempt == 0:
+                        print("10초 후 다시 시도합니다...")
+                        await asyncio.sleep(10)
+                    else:
+                        raise e
+
             print("생성 완료를 기다립니다 (약 3~10분 소요됩니다)...")
             # 완료될 때까지 대기
             audio_result = await client.artifacts.wait_for_completion(notebook.id, audio_job.task_id, timeout=900)

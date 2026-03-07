@@ -1,3 +1,8 @@
 requests
 feedparser
 beautifulsoup4
+python-dotenv
+notebooklm-py
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib

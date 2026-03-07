@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.env
+
+# Authentication & Secrets
+credentials.json
+token.json
+.notebooklm/
+auth_json.json
+storage_state.json
+
+# Logs & Temp files
+*.log
+temp_source.txt
+podcast_*.wav
+
+# IDE
+.vscode/
+.idea/
+.gemini/
+antigravity-awesome-skills/

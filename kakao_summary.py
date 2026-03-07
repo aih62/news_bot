@@ -4,9 +4,17 @@ import os
 from datetime import datetime
 from bs4 import BeautifulSoup
 import html
+from dotenv import load_dotenv
+
+# .env 파일 로드 (로컬 테스트용)
+load_dotenv()
 
 # ================= CONFIGURATION =================
+# 환경 변수에서 가져오되, 비어있거나 '/'만 있는 경우 기본값 사용
 WP_SITE_URL = os.getenv("WP_SITE_URL", "https://ajken.mycafe24.com")
+if not WP_SITE_URL or WP_SITE_URL.strip() == "":
+    WP_SITE_URL = "https://ajken.mycafe24.com"
+WP_SITE_URL = WP_SITE_URL.rstrip('/')
 KAKAO_TOKEN_JSON = os.getenv("KAKAO_TOKEN_JSON") # JSON string from GitHub Secrets
 REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 
@@ -29,8 +37,24 @@ def get_today_posts():
         print(f"포스트 가져오기 실패: {e}")
     return []
 
+def shorten_url(long_url):
+    """is.gd API를 사용하여 단축 URL을 생성합니다. (API 키 불필요)"""
+    try:
+        url = "https://is.gd/create.php"
+        params = {"format": "simple", "url": long_url}
+        res = requests.get(url, params=params, timeout=10)
+        
+        if res.status_code == 200:
+            return res.text.strip()
+        else:
+            print(f"URL 단축 실패 (is.gd): {res.status_code}")
+    except Exception as e:
+        print(f"URL 단축 오류: {e}")
+    return long_url
+
+
 def format_message(posts):
-    """포스트 리스트를 카카오톡 메시지 형식으로 변환합니다."""
+    """포스트 리스트를 간결한 카카오톡 메시지 형식으로 변환합니다."""
     today_str = datetime.now().strftime("%Y-%m-%d")
     msg = f"[정보보호 산업 동향 {today_str}]\n\n"
     
@@ -39,26 +63,18 @@ def format_message(posts):
         content_html = post['content']['rendered']
         soup = BeautifulSoup(content_html, 'html.parser')
         
-        # 서브 헤드라인 (h3) 추출
-        sub_headline = soup.find('h3').get_text() if soup.find('h3') else "내용 요약"
-        
         # 출처 추출 (p 태그 안의 텍스트)
-        source_text = ""
-        source_p = soup.find('p', string=lambda t: t and '출처:' in t)
-        if not source_p:
-            # 출처 형식이 <a> 태그를 포함한 경우 등 대비
-            for p in soup.find_all('p'):
-                if '출처:' in p.get_text():
-                    source_text = p.get_text().replace("출처:", "").strip()
-                    break
-        else:
-            source_text = source_p.get_text().replace("출처:", "").strip()
+        source_text = "기타"
+        for p in soup.find_all('p'):
+            if '출처:' in p.get_text():
+                source_text = p.get_text().replace("출처:", "").strip()
+                break
             
-        link = post['link']
+        # URL 단축 적용
+        link = shorten_url(post['link'])
         
-        msg += f"{i}. {title}\n"
-        msg += f" - {sub_headline} [{source_text}]\n"
-        msg += f" - [기사보기] {link}\n\n"
+        msg += f"{i}. {title} [{source_text}]\n"
+        msg += f"- {link}\n\n"
         
     return msg.strip()
 

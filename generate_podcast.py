@@ -92,10 +92,9 @@ async def generate_notebooklm_podcast(source_text):
                 try:
                     print(f"팟캐스트(Audio Overview) 생성 요청 중 (시도 {attempt + 1}/2)...")
                     prompt_instructions = (
-                        "제공된 10개의 최신 글로벌 보안 뉴스를 바탕으로 단일 팟캐스트 에피소드를 만들어 주세요. "
-                        "뉴스 10개를 각각 따로 읽는 것이 아니라, 전체적인 동향과 가장 중요한 이슈들을 하나로 엮어서 "
-                        "한국어로 자연스럽게 대화하며 소개해야 합니다. "
-                        "전체적인 분량은 20분을 넘지 않도록 간결하게 구성해 주세요."
+                        "제공된 10개의 최신 기사를 바탕으로 하나의 뉴스 요약 팟캐스트 에피소드를 만들어 주세요. "
+                        "뉴스 10개를 각각 따로 읽지 말고 서로 연관된 주제끼리 묶어서 자연스럽게 대화하며 소개해야 합니다. "
+                        "전체 분량은 약 5~10분 내외로 핵심만 짚어서 한국어로 재미있게 구성해 주세요."
                     )
                     audio_job = await client.artifacts.generate_audio(
                         notebook.id,
@@ -112,10 +111,26 @@ async def generate_notebooklm_podcast(source_text):
                     else:
                         raise e
 
-            print("생성 완료를 기다립니다 (약 3~10분 소요됩니다)...")
-            # 완료될 때까지 대기
-            audio_result = await client.artifacts.wait_for_completion(notebook.id, audio_job.task_id, timeout=900)
+            print("생성 완료를 기다립니다 (최대 20분 소요)...")
+            # 커스텀 폴링 루프 (진행 상황 가시성 확보 및 타임아웃 연장)
+            start_time = asyncio.get_event_loop().time()
+            timeout = 1200 # 20분
+            audio_result = None
             
+            while True:
+                audio_result = await client.artifacts.poll_status(notebook.id, audio_job.task_id)
+                elapsed = asyncio.get_event_loop().time() - start_time
+                
+                print(f"[{int(elapsed)}초 경과] 현재 상태: {audio_result.status}")
+                
+                if audio_result.is_complete or audio_result.is_failed:
+                    break
+                    
+                if elapsed > timeout:
+                    raise Exception(f"팟캐스트 생성 타임아웃 ({timeout}초 초과)")
+                
+                await asyncio.sleep(20) # 20초마다 확인
+
             # 다운로드 경로
             output_filename = f"podcast_{datetime.now().strftime('%Y%m%d')}.wav"
             
@@ -136,8 +151,7 @@ async def generate_notebooklm_podcast(source_text):
         except Exception as e:
              print(f"NotebookLM 처리 중 오류 발생: {e}")
         finally:
-             if os.path.exists("temp_source.txt"):
-                 os.remove("temp_source.txt")
+             pass
              
     return None
 

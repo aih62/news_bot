@@ -75,20 +75,16 @@ async def generate_notebooklm_podcast(source_text):
             notebook = await client.notebooks.create(title=title)
             print(f"새 노트북 생성 완료: {notebook.title}")
             
-            # 2. 소스 업로드 (텍스트 파일로 임시 저장 후 파일로 업로드 권장)
-            temp_file = "temp_source.txt"
-            with open(temp_file, "w", encoding="utf-8") as f:
-                f.write(source_text)
-                
+            # 2. 소스 문서 추가 (텍스트 직접 추가 방식이 클라우드 환경에서 더 안정적일 수 있습니다)
             print("소스 문서 추가 중...")
-            await client.sources.add_file(notebook.id, temp_file)
+            source = await client.sources.add_text(notebook.id, f"News_{datetime.now().strftime('%Y%m%d')}", source_text)
             
-            # 소스가 인덱싱될 시간을 충분히 확보해야 RPC CREATE_ARTIFACT 실패 에러를 방지할 수 있습니다.
-            print("소스가 인덱싱될 때까지 15초 대기...")
-            await asyncio.sleep(15)
-            # GitHub Actions 환경은 로컬보다 네트워크/처리 지연이 있을 수 있어 30초로 늘립니다.
-            print("소스가 인덱싱될 때까지 30초 대기...")
-            await asyncio.sleep(30)
+            # 소스가 인덱싱될 시간을 충분히 확보합니다.
+            print("소스 인덱싱 대기 중 (최대 5분)...")
+            await client.sources.wait_until_ready(notebook.id, source.id, timeout=300)
+            
+            # 인덱싱 완료 후 안정성을 위해 추가 대기
+            await asyncio.sleep(10)
             
             # 3. 오디오 오버뷰 (팟캐스트) 생성 요청 (실패 시 최대 2회 재시도)
             audio_job = None

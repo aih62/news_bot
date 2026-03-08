@@ -1,7 +1,7 @@
 import requests
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 import html
 from dotenv import load_dotenv
@@ -18,6 +18,12 @@ WP_SITE_URL = WP_SITE_URL.rstrip('/')
 KAKAO_TOKEN_JSON = os.getenv("KAKAO_TOKEN_JSON") # JSON string from GitHub Secrets
 REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
 
+def get_kst_today():
+    """한국 시간(KST) 기준으로 오늘 날짜 문자열(YYYY-MM-DD)을 반환합니다."""
+    # UTC+9 설정
+    kst = timezone(timedelta(hours=9))
+    return datetime.now(kst).strftime("%Y-%m-%d")
+
 def get_today_posts():
     """워드프레스에서 오늘 날짜의 최신 포스트 10개를 가져옵니다."""
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
@@ -26,7 +32,7 @@ def get_today_posts():
         res = requests.get(endpoint, params=params, timeout=20)
         if res.status_code == 200:
             posts = res.json()
-            today_str = datetime.now().strftime("%Y-%m-%d")
+            today_str = get_kst_today()
             today_posts = []
             for post in posts:
                 # 워드프레스 날짜 형식: "2026-03-06T07:00:00"
@@ -55,7 +61,7 @@ def shorten_url(long_url):
 
 def format_message(posts):
     """포스트 리스트를 간결한 카카오톡 메시지 형식으로 변환합니다."""
-    today_str = datetime.now().strftime("%Y-%m-%d")
+    today_str = get_kst_today()
     msg = f"[정보보호 산업 동향 {today_str}]\n\n"
     
     for i, post in enumerate(posts, 1):

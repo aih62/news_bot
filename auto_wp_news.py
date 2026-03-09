@@ -6,7 +6,11 @@ from requests.auth import HTTPBasicAuth
 import time
 import os
 import html
+import urllib3
 from urllib.parse import quote, urljoin
+
+# SSL 경고 무시
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ================= CONFIGURATION (환경 변수 설정) =================
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
@@ -252,14 +256,26 @@ def upload_media_from_url(image_url):
     print(f"이미지 업로드 시도: {image_url[:50]}...")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
-        img_res = requests.get(image_url, timeout=20, headers=COMMON_HEADERS)
-        if img_res.status_code != 200: return None
+        # SSL 검증 무시 및 타임아웃 증가
+        img_res = requests.get(image_url, timeout=30, headers=COMMON_HEADERS, verify=False)
+        if img_res.status_code != 200: 
+            print(f"  -> 이미지 다운로드 실패 (Status: {img_res.status_code})")
+            return None
+            
         content_type = img_res.headers.get('Content-Type', 'image/jpeg')
         filename = f"news_img_{int(time.time())}.jpg"
         headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
-        up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=30)
-        if up_res.status_code in [200, 201]: return up_res.json().get('id')
-    except: pass
+        
+        # 워드프레스 업로드 시에도 SSL 검증 무시
+        up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=40, verify=False)
+        if up_res.status_code in [200, 201]: 
+            media_id = up_res.json().get('id')
+            print(f"  -> 이미지 업로드 성공 (ID: {media_id})")
+            return media_id
+        else:
+            print(f"  -> 워드프레스 업로드 실패 (Status: {up_res.status_code})")
+    except Exception as e: 
+        print(f"  -> 이미지 처리 중 예외 발생: {e}")
     return None
 
 def get_or_create_term(taxonomy, name):

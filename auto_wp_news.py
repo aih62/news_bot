@@ -255,37 +255,45 @@ def upload_media_from_url(image_url):
     if not image_url or not image_url.startswith("http"): return None
     print(f"이미지 업로드 시도: {image_url[:50]}...")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    try:
-        # SSL 검증 무시 및 타임아웃 증가
-        img_res = requests.get(image_url, timeout=30, headers=COMMON_HEADERS, verify=False)
-        if img_res.status_code != 200: 
-            print(f"  -> 이미지 다운로드 실패 (Status: {img_res.status_code})")
-            return None
+    
+    # 파일명 정규화 (특수문자 제거)
+    clean_filename = re.sub(r'[^a-zA-Z0-9]', '_', image_url.split('/')[-1].split('?')[0])
+    if not clean_filename or len(clean_filename) < 5:
+        clean_filename = f"news_image_{int(time.time())}"
+    filename = f"{clean_filename[:30]}.jpg"
+
+    for attempt in range(2): # 최대 2번 시도
+        try:
+            # SSL 검증 무시 및 타임아웃 증가
+            img_res = requests.get(image_url, timeout=30, headers=COMMON_HEADERS, verify=False)
+            if img_res.status_code != 200: 
+                print(f"  -> [{attempt+1}] 이미지 다운로드 실패 (Status: {img_res.status_code})")
+                continue
+                
+            content_type = img_res.headers.get('Content-Type', 'image/jpeg')
+            headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
             
-        content_type = img_res.headers.get('Content-Type', 'image/jpeg')
-        filename = f"news_img_{int(time.time())}.jpg"
-        headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
-        
-        # 워드프레스 업로드 시에도 SSL 검증 무시
-        up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=40, verify=False)
-        if up_res.status_code in [200, 201]: 
-            media_id = up_res.json().get('id')
-            print(f"  -> 이미지 업로드 성공 (ID: {media_id})")
-            return media_id
-        else:
-            print(f"  -> 워드프레스 업로드 실패 (Status: {up_res.status_code})")
-    except Exception as e: 
-        print(f"  -> 이미지 처리 중 예외 발생: {e}")
+            # 워드프레스 업로드
+            up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=40, verify=False)
+            if up_res.status_code in [200, 201]: 
+                media_id = up_res.json().get('id')
+                print(f"  -> [{attempt+1}] 이미지 업로드 성공 (ID: {media_id})")
+                return media_id
+            else:
+                print(f"  -> [{attempt+1}] 워드프레스 업로드 실패 (Status: {up_res.status_code})")
+        except Exception as e: 
+            print(f"  -> [{attempt+1}] 이미지 처리 중 예외 발생: {e}")
+        time.sleep(2)
     return None
 
 def get_or_create_term(taxonomy, name):
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/{taxonomy}"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
-        res = session.get(endpoint, auth=auth, params={"search": name}, timeout=20)
+        res = session.get(endpoint, auth=auth, params={"search": name}, timeout=20, verify=False)
         if res.status_code == 200 and res.json():
             return res.json()[0]['id']
-        res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20)
+        res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20, verify=False)
         if res.status_code in [200, 201]: return res.json()['id']
     except: pass
     return None
@@ -305,11 +313,11 @@ def post_to_wordpress(news_data, original_news_list):
     if not target_image: target_image = get_image_from_webpage(source_url)
     if not target_image: target_image = news_data.get('image_url')
 
-    # 2. 이미지 업로드 시도 (실패 시 0을 할당하여 FIFU가 외부 URL을 사용하도록 함)
+    # 2. 이미지 업로드 시도 (실패 시 기본 이미지 3221 사용으로 복구)
     media_id = upload_media_from_url(target_image)
     if not media_id:
-        print(f"  -> 업로드 실패 혹은 이미지 없음. 특성 이미지 ID를 0으로 설정하여 FIFU가 작동하도록 합니다.")
-        media_id = 0
+        print(f"  -> 업로드 실패 혹은 이미지 없음. 기본 이미지 ID {GUARANTEED_MEDIA_ID}를 할당합니다.")
+        media_id = GUARANTEED_MEDIA_ID
 
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
@@ -331,7 +339,7 @@ def post_to_wordpress(news_data, original_news_list):
     }
     
     try:
-        res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30)
+        res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30, verify=False)
         if res.status_code in [200, 201]:
             print(f"발행 성공! (확인: {res.json().get('link')})")
         else: print(f"발행 실패: {res.status_code}")

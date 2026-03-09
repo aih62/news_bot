@@ -21,8 +21,8 @@ if not WP_SITE_URL:
     WP_SITE_URL = "https://ajken.mycafe24.com"
 WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
-# 기본 이미지 URL (이미지가 없을 때 사용)
-DEFAULT_IMAGE_URL = "http://ajken.mycafe24.com/wp-content/uploads/2026/03/thedigitalartist-security-4868167_1920.jpg"
+# 기본 이미지 URL (이미지가 없을 때 사용 - 보안 뉴스에 어울리는 이미지)
+DEFAULT_IMAGE_URL = "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=1000"
 
 # 공통 헤더
 COMMON_HEADERS = {
@@ -310,25 +310,31 @@ def post_to_wordpress(news_data, original_news_list):
         target_image = news_data.get('image_url')
 
     # 2. 이미지 업로드 (실패 시 디폴트 이미지 사용)
+    # Note: 401 에러 등으로 업로드가 실패하더라도 본문에 직접 삽입하여 보이게 합니다.
     media_id = upload_media_from_url(target_image)
     if not media_id:
-        print("  -> 이미지 업로드 실패. 기본 이미지를 사용합니다.")
-        media_id = upload_media_from_url(DEFAULT_IMAGE_URL)
+        print("  -> 이미지 미디어 라이브러리 업로드 실패 (또는 건너뜀).")
+        media_id = 0 # 0이면 featured_media 설정 안 함
 
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
     tag_ids = [tid for tid in tag_ids if tid]
     
+    # 3. 본문 상단에 이미지 태그 삽입 (가장 확실한 방법)
+    display_image = target_image or DEFAULT_IMAGE_URL
+    img_tag = f'<img src="{display_image}" alt="{news_data["title"]}" style="width: 100%; max-width: 800px; height: auto; display: block; margin: 0 auto 20px auto; border-radius: 8px; border: 1px solid #eee;">'
+    final_content = img_tag + news_data.get('content', '내용 없음')
+    
     payload = {
         "title": news_data['title'],
-        "content": news_data.get('content', '내용 없음'),
+        "content": final_content,
         "status": "publish",
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids,
-        "featured_media": media_id if media_id else 0,
+        "featured_media": media_id,
         "meta": {
-            "fifu_image_url": target_image or DEFAULT_IMAGE_URL,
-            "_featured_image_url": target_image or DEFAULT_IMAGE_URL
+            "fifu_image_url": display_image,
+            "_featured_image_url": display_image
         }
     }
     

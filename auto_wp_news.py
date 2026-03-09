@@ -25,7 +25,8 @@ if not WP_SITE_URL:
     WP_SITE_URL = "https://ajken.mycafe24.com"
 WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
-# 외부 링크 모드에서는 기본 이미지 URL만 상수로 유지
+# 보장된 기본 이미지 ID (워드프레스 미디어 라이브러리 내 실제 ID)
+GUARANTEED_MEDIA_ID = 3221 
 DEFAULT_IMAGE_URL = "http://ajken.mycafe24.com/wp-content/uploads/2026/03/thedigitalartist-security-4868167_1920.jpg"
 
 # 공통 헤더
@@ -249,6 +250,42 @@ def analyze_news_with_perplexity(news_list, recent_titles):
         print(f"AI 분석 중 예외 발생: {e}")
     return []
 
+def upload_media_from_url(image_url):
+    """이미지를 워드프레스에 업로드하고 ID를 반환합니다."""
+    if not image_url or not image_url.startswith("http"): return None
+    print(f"이미지 업로드 시도: {image_url[:50]}...")
+    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
+    
+    # 파일명 정규화 (특수문자 제거)
+    clean_filename = re.sub(r'[^a-zA-Z0-9]', '_', image_url.split('/')[-1].split('?')[0])
+    if not clean_filename or len(clean_filename) < 5:
+        clean_filename = f"news_image_{int(time.time())}"
+    filename = f"{clean_filename[:30]}.jpg"
+
+    for attempt in range(2): # 최대 2번 시도
+        try:
+            # SSL 검증 무시 및 타임아웃 증가
+            img_res = requests.get(image_url, timeout=30, headers=COMMON_HEADERS, verify=False)
+            if img_res.status_code != 200: 
+                print(f"  -> [{attempt+1}] 이미지 다운로드 실패 (Status: {img_res.status_code})")
+                continue
+                
+            content_type = img_res.headers.get('Content-Type', 'image/jpeg')
+            headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
+            
+            # 워드프레스 업로드 시에도 SSL 검증 무시
+            up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=40, verify=False)
+            if up_res.status_code in [200, 201]: 
+                media_id = up_res.json().get('id')
+                print(f"  -> [{attempt+1}] 이미지 업로드 성공 (ID: {media_id})")
+                return media_id
+            else:
+                print(f"  -> [{attempt+1}] 워드프레스 업로드 실패 (Status: {up_res.status_code})")
+        except Exception as e: 
+            print(f"  -> [{attempt+1}] 이미지 처리 중 예외 발생: {e}")
+        time.sleep(2)
+    return None
+
 def get_or_create_term(taxonomy, name):
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/{taxonomy}"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
@@ -262,11 +299,11 @@ def get_or_create_term(taxonomy, name):
     return None
 
 def post_to_wordpress(news_data, original_news_list):
-    """뉴스를 워드프레스에 포스팅합니다. (외부 링크 모드)"""
+    """뉴스를 워드프레스에 포스팅합니다."""
     print(f"--- 포스팅 시도: {news_data['title']} ---")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
-    # 1. 실제 이미지 주소 결정 (업로드하지 않고 URL만 사용)
+    # 1. 실제 이미지 주소 결정
     target_image = None
     source_url = news_data.get('source_url')
     for item in original_news_list:
@@ -276,20 +313,24 @@ def post_to_wordpress(news_data, original_news_list):
     if not target_image: target_image = get_image_from_webpage(source_url)
     if not target_image: target_image = news_data.get('image_url')
 
-    # 2. 카테고리 및 태그 설정
+    # 2. 이미지 업로드 시도 (서버 저장 방식 복구)
+    media_id = upload_media_from_url(target_image)
+    if not media_id:
+        print(f"  -> 업로드 실패 혹은 이미지 없음. 기본 이미지 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
+        media_id = GUARANTEED_MEDIA_ID
+
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
     tag_ids = [tid for tid in tag_ids if tid]
     
-    # 3. 포스팅 데이터 구성 (서버 업로드 없이 FIFU 메타 데이터만 활용)
-    # featured_media를 0으로 설정하여 테마가 FIFU 외부 URL을 사용하도록 유도합니다.
+    # 3. 포스팅 데이터 구성
     payload = {
         "title": news_data['title'],
         "content": news_data.get('content', '내용 없음'),
         "status": "publish",
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids,
-        "featured_media": 0, 
+        "featured_media": media_id,
         "meta": {
             "fifu_image_url": target_image or DEFAULT_IMAGE_URL,
             "fifu_image_alt": "",
@@ -300,8 +341,7 @@ def post_to_wordpress(news_data, original_news_list):
     try:
         res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30, verify=False)
         if res.status_code in [200, 201]:
-            print(f"발행 성공! (외부 이미지 URL: {target_image[:50]}...)")
-            print(f"확인: {res.json().get('link')}")
+            print(f"발행 성공! (확인: {res.json().get('link')})")
         else: print(f"발행 실패: {res.status_code}")
     except Exception as e: print(f"포스팅 예외: {e}")
 

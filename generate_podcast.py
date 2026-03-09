@@ -7,12 +7,14 @@ from bs4 import BeautifulSoup
 import html
 from dotenv import load_dotenv
 import asyncio
+import re
 
 import sys
 sys.path.append(r"C:\Users\inhoe\AppData\Roaming\Python\Python313\site-packages")
 
 # NotebookLM
 from notebooklm import NotebookLMClient
+from notebooklm.types import AudioLength, ReportFormat, SlideDeckFormat, SlideDeckLength, ArtifactType
 
 # Google Drive API
 from google.oauth2.credentials import Credentials
@@ -20,8 +22,6 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
-
-from notebooklm.rpc.types import AudioLength
 
 load_dotenv()
 
@@ -31,122 +31,197 @@ WP_SITE_URL = os.getenv("WP_SITE_URL", "https://ajken.mycafe24.com").rstrip('/')
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
 
-def get_today_posts_text():
-    """워드프레스에서 오늘 날짜의 최신 포스트 10개를 가져와 하나의 텍스트로 결합합니다."""
-    print("워드프레스에서 오늘 포스팅 가져오는 중...")
+def get_today_posts_content():
+    """워드프레스에서 오늘 날짜의 최신 포스트 10개를 가져와 제목과 본문(텍스트) 목록을 반환합니다."""
+    print("워드프레스에서 오늘 포스팅 가져오는 중...", flush=True)
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
     params = {"per_page": 10, "status": "publish"}
-    combined_text = ""
+    posts_data = []
     
     try:
         res = requests.get(endpoint, params=params, timeout=20)
         if res.status_code == 200:
             posts = res.json()
-            today_str = datetime.now().strftime("%Y-%m-%d")
             
-            count = 0
             for post in posts:
-                # 워드프레스 날짜 형식: "2026-03-06T07:00:00"
-                if post['date'].startswith(today_str):
-                    title = html.unescape(post['title']['rendered'])
-                    content_html = post['content']['rendered']
-                    soup = BeautifulSoup(content_html, 'html.parser')
-                    text = soup.get_text(separator='\n', strip=True)
-                    
-                    combined_text += f"제목: {title}\n"
-                    combined_text += f"내용:\n{text}\n\n"
-                    combined_text += "-" * 50 + "\n\n"
-                    count += 1
-            print(f"-> 총 {count}개의 포스트를 성공적으로 추출했습니다.")
-            return combined_text
+                title = html.unescape(post['title']['rendered'])
+                content_html = post['content']['rendered']
+                soup = BeautifulSoup(content_html, 'html.parser')
+                
+                # 텍스트만 추출 (스크립트, 스타일 시트 제외)
+                for script_or_style in soup(['script', 'style']):
+                    script_or_style.decompose()
+                
+                clean_text = soup.get_text(separator='\n', strip=True)
+                posts_data.append({"title": title, "content": clean_text})
+                            
+            print(f"-> 총 {len(posts_data)}개의 포스트 내용을 성공적으로 추출했습니다.", flush=True)
+            return posts_data
     except Exception as e:
-        print(f"포스트 가져오기 실패: {e}")
-    return combined_text
+        print(f"포스트 데이터 가져오기 실패: {e}", flush=True)
+    return []
 
-async def generate_notebooklm_podcast(source_text):
-    """NotebookLM-py를 사용하여 텍스트 소스를 기반으로 팟캐스트를 생성하고 다운로드합니다."""
-    print("NotebookLM 작업 시작...")
-    # NOTE: 먼저 터미널에서 `notebooklm login` 을 실행하여 로그인 세션을 만들어야 합니다.
-    async with await NotebookLMClient.from_storage() as client:
-    
+async def generate_notebooklm_podcast(posts_data):
+    """NotebookLM-py를 사용하여 추출된 텍스트를 기반으로 팟캐스트를 생성하고 다운로드합니다."""
+    # NotebookLMClient.from_storage()는 인자가 없으면 환경변수 NOTEBOOKLM_AUTH_JSON을 먼저 확인하고, 
+    # 없으면 기본 경로(~/.notebooklm/storage_state.json)를 사용합니다.
+    async with await NotebookLMClient.from_storage(timeout=120) as client:
+
         try:
             # 1. 새 노트북 생성
-            title = f"Daily News Podcast - {datetime.now().strftime('%Y-%m-%d')}"
+            timestamp_str = datetime.now().strftime('%Y-%m-%d %H:%M')
+            title = f"Daily News Podcast - {timestamp_str}"
             notebook = await client.notebooks.create(title=title)
-            print(f"새 노트북 생성 완료: {notebook.title}")
+            print(f"새 노트북 생성 완료: {notebook.title}", flush=True)
             
-            # 2. 소스 문서 추가 (텍스트 직접 추가 방식이 클라우드 환경에서 더 안정적일 수 있습니다)
-            print("소스 문서 추가 중...")
-            source = await client.sources.add_text(notebook.id, f"News_{datetime.now().strftime('%Y%m%d')}", source_text)
-            
-            # 소스가 인덱싱될 시간을 충분히 확보합니다.
-            print("소스 인덱싱 대기 중 (최대 5분)...")
-            await client.sources.wait_until_ready(notebook.id, source.id, timeout=300)
-            
-            # 인덱싱 완료 후 안정성을 위해 추가 대기
-            await asyncio.sleep(10)
-            
-            # 3. 오디오 오버뷰 (팟캐스트) 생성 요청 (실패 시 최대 2회 재시도)
-            audio_job = None
-            for attempt in range(2):
+            # 2. 소스 문서 추가 (텍스트 기반)
+            print(f"소스 텍스트 추가 중 ({len(posts_data)}개)...", flush=True)
+            sources = []
+            for i, data in enumerate(posts_data):
                 try:
-                    print(f"팟캐스트(Audio Overview) 생성 요청 중 (시도 {attempt + 1}/2)...")
-                    prompt_instructions = (
-                        "제공된 10개의 최신 기사를 바탕으로 하나의 뉴스 요약 팟캐스트 에피소드를 만들어 주세요. "
-                        "뉴스 10개를 각각 따로 읽지 말고 서로 연관된 주제끼리 묶어서 자연스럽게 대화하며 소개해야 합니다. "
-                        "전체 분량은 약 5~10분 내외로 핵심만 짚어서 한국어로 재미있게 구성해 주세요."
-                    )
-                    audio_job = await client.artifacts.generate_audio(
-                        notebook.id,
-                        language="ko",
-                        audio_length=AudioLength.SHORT,
-                        instructions=prompt_instructions
-                    )
-                    break
-                except Exception as e:
-                    print(f"생성 요청 실패: {e}")
-                    if attempt == 0:
-                        print("10초 후 다시 시도합니다...")
-                        await asyncio.sleep(10)
-                    else:
-                        raise e
+                    print(f"[{i+1}/{len(posts_data)}] 소스 추가: {data['title']}", flush=True)
+                    source = await client.sources.add_text(notebook.id, data['title'], data['content'])
+                    sources.append(source)
+                except Exception as err:
+                    print(f"소스 추가 실패 ({data['title']}): {err}", flush=True)
+            
+            if not sources:
+                raise Exception("추가된 소스가 하나도 없습니다.")
 
-            print("생성 완료를 기다립니다 (최대 20분 소요)...")
-            # 커스텀 폴링 루프 (진행 상황 가시성 확보 및 타임아웃 연장)
+            # 모든 소스가 인덱싱될 시간을 충분히 확보합니다.
+            print("모든 소스 인덱싱 대기 중...", flush=True)
+            for source in sources:
+                try:
+                    await client.sources.wait_until_ready(notebook.id, source.id, timeout=300)
+                except Exception as e:
+                    print(f"소스 준비 대기 중 오류 (ID: {source.id}): {e}", flush=True)
+            
+            # 안정적인 생성을 위해 인덱싱 완료 후 30초 추가 대기
+            print("인덱싱 후 안정화를 위해 30초간 대기합니다...", flush=True)
+            await asyncio.sleep(30)
+            
+            # 3. 오디오 오버뷰 (팟캐스트) 생성 요청
+            print(f"팟캐스트(Audio Overview) 생성 요청 중 (한국어)...", flush=True)
+            audio_job = None
+            try:
+                # 한국어 설정 명시 및 사용자 지침 추가
+                audio_job = await client.artifacts.generate_audio(
+                    notebook.id,
+                    language="ko",
+                    instructions="한국어로 대화해 주세요. 전문적이고 유익한 뉴스 팟캐스트 스타일로 진행해 주세요."
+                )
+                print(f"오디오 생성 작업 시작됨 (Task ID: {audio_job.task_id})", flush=True)
+            except Exception as e:
+                print(f"오디오 생성 요청 실패: {e}", flush=True)
+
+            # 4. 브리핑 문서(Report) 생성 요청
+            print("브리핑 문서(Report) 생성 요청 중 (한국어)...", flush=True)
+            report_job = None
+            try:
+                report_job = await client.artifacts.generate_report(
+                    notebook.id, 
+                    report_format=ReportFormat.BRIEFING_DOC,
+                    language="ko"
+                )
+                print(f"브리핑 문서 생성 작업 시작됨 (Task ID: {report_job.task_id})", flush=True)
+            except Exception as report_err:
+                print(f"브리핑 문서 생성 요청 실패: {report_err}", flush=True)
+
+            # 5. 슬라이드 덱(Slide Deck) 생성 요청
+            print("슬라이드 덱(Slide Deck) 생성 요청 중 (한국어)...", flush=True)
+            slides_job = None
+            try:
+                slides_job = await client.artifacts.generate_slide_deck(
+                    notebook.id,
+                    language="ko"
+                )
+                print(f"슬라이드 덱 생성 작업 시작됨 (Task ID: {slides_job.task_id})", flush=True)
+            except Exception as slides_err:
+                print(f"슬라이드 덱 생성 요청 실패: {slides_err}", flush=True)
+
+            # 폴링 및 다운로드 (최대 40분 대기)
             start_time = asyncio.get_event_loop().time()
-            timeout = 1200 # 20분
-            audio_result = None
+            timeout = 2400 
+            timestamp_file = datetime.now().strftime('%Y%m%d_%H%M')
+            podcast_filename = f"podcast_{timestamp_file}.wav"
+            report_filename = f"report_{timestamp_file}.txt"
+            slides_filename = f"slides_{timestamp_file}.txt"
+            files_downloaded = []
+
+            print("아티팩트 생성 완료 대기 및 다운로드 시도...", flush=True)
             
             while True:
-                audio_result = await client.artifacts.poll_status(notebook.id, audio_job.task_id)
                 elapsed = asyncio.get_event_loop().time() - start_time
-                
-                print(f"[{int(elapsed)}초 경과] 현재 상태: {audio_result.status}")
-                
-                if audio_result.is_complete or audio_result.is_failed:
-                    break
-                    
                 if elapsed > timeout:
-                    raise Exception(f"팟캐스트 생성 타임아웃 ({timeout}초 초과)")
+                    print("대기 시간 초과로 종료합니다.", flush=True)
+                    break
                 
-                await asyncio.sleep(20) # 20초마다 확인
+                try:
+                    all_artifacts = await client.artifacts.list(notebook.id)
+                    
+                    for art in all_artifacts:
+                        # 오디오 다운로드
+                        if art.kind == ArtifactType.AUDIO and art.url and podcast_filename not in files_downloaded:
+                            print(f"오디오 발견! 다운로드 중...", flush=True)
+                            res = requests.get(art.url)
+                            if res.status_code == 200:
+                                with open(podcast_filename, 'wb') as f:
+                                    f.write(res.content)
+                                files_downloaded.append(podcast_filename)
+                        
+                        # 리포트/브리핑 문서 저장
+                        if art.kind == ArtifactType.REPORT and report_filename not in files_downloaded:
+                            content = getattr(art, 'content', None)
+                            if not content and art.url:
+                                try: content = requests.get(art.url).text
+                                except: pass
+                            
+                            if content:
+                                print(f"리포트({art.title}) 발견! 저장 중...", flush=True)
+                                with open(report_filename, 'w', encoding='utf-8') as f:
+                                    f.write(content)
+                                files_downloaded.append(report_filename)
 
-            # 다운로드 경로
-            output_filename = f"podcast_{datetime.now().strftime('%Y%m%d')}.wav"
-            
-            if audio_result.is_complete and audio_result.url:
-                 print(f"팟캐스트 다운로드 중: {output_filename}")
-                 res = requests.get(audio_result.url)
-                 with open(output_filename, 'wb') as f:
-                     f.write(res.content)
-                 print("다운로드 완료!")
-                 return output_filename
-            else:
-                if audio_result.is_failed:
-                    print(f"오디오 생성 실패: {audio_result.error}")
-                else:
-                    print("오디오 URL을 찾을 수 없거나 아직 생성되지 않았습니다.")
-                return None
+                        # 슬라이드 덱 저장
+                        if art.kind == ArtifactType.SLIDE_DECK and slides_filename not in files_downloaded:
+                            print(f"슬라이드 덱 발견! 저장 중...", flush=True)
+                            content = getattr(art, 'content', str(getattr(art, 'metadata', '')))
+                            with open(slides_filename, 'w', encoding='utf-8') as f:
+                                f.write(content)
+                            files_downloaded.append(slides_filename)
+
+                    # 상태 확인 (이미 다운로드된 파일들 기준)
+                    audio_done = (podcast_filename in files_downloaded) or (audio_job is None)
+                    report_done = (report_filename in files_downloaded) or (report_job is None)
+                    slides_done = (slides_filename in files_downloaded) or (slides_job is None)
+
+                    if audio_done and report_done and slides_done:
+                        if files_downloaded:
+                            print(f"아티팩트 다운로드 완료: {files_downloaded}", flush=True)
+                            break
+
+                    # 중간에 오디오가 여전히 실패 상태면 1회 재시도 (인덱싱 후 시간이 더 필요할 수 있음)
+                    if not audio_done and audio_job is None and elapsed > 300:
+                         print("오디오 생성을 재시도합니다 (한국어)...", flush=True)
+                         try:
+                             audio_job = await client.artifacts.generate_audio(
+                                 notebook.id,
+                                 language="ko",
+                                 instructions="한국어로 대화해 주세요."
+                             )
+                             if audio_job:
+                                 print(f"오디오 재시도 작업 시작됨 (Task ID: {audio_job.task_id})", flush=True)
+                         except:
+                             pass
+
+                    print(f"[{int(elapsed)}초 경과] 대기 중... (Audio: {'O' if podcast_filename in files_downloaded else 'X'}, Report: {'O' if report_filename in files_downloaded else 'X'}, Slides: {'O' if slides_filename in files_downloaded else 'X'})", flush=True)
+                    await asyncio.sleep(60)
+                    
+                except Exception as poll_err:
+                    print(f"상태 확인 중 오류 (무시하고 계속): {poll_err}", flush=True)
+                    await asyncio.sleep(30)
+
+            return files_downloaded
                 
         except Exception as e:
              print(f"NotebookLM 처리 중 오류 발생: {e}")
@@ -154,6 +229,7 @@ async def generate_notebooklm_podcast(source_text):
              pass
              
     return None
+
 
 def authenticate_drive():
     """Google Drive API 인증을 수행하고 인증 객체를 반환합니다."""
@@ -173,19 +249,19 @@ def authenticate_drive():
     return creds
 
 def upload_to_drive(file_path):
-    """다운로드한 팟캐스트 파일을 Google Drive에 업로드합니다."""
-    print("Google Drive 업로드 시작...")
+    """다운로드한 파일을 Google Drive에 업로드합니다."""
+    print(f"Google Drive 업로드 시작: {os.path.basename(file_path)}")
     try:
         creds = authenticate_drive()
         service = build('drive', 'v3', credentials=creds)
 
         file_metadata = {'name': os.path.basename(file_path)}
-        media = MediaFileUpload(file_path, mimetype='audio/wav')
+        mimetype = 'audio/wav' if file_path.endswith('.wav') else 'text/plain'
+        media = MediaFileUpload(file_path, mimetype=mimetype)
         
         file = service.files().create(body=file_metadata, media_body=media,
                                       fields='id, webViewLink').execute()
         print(f"파일 업로드 성공! 파일 ID: {file.get('id')}")
-        print(f"웹 보기 링크: {file.get('webViewLink')}")
         return file.get('webViewLink')
 
     except Exception as error:
@@ -193,25 +269,29 @@ def upload_to_drive(file_path):
         return None
 
 async def main():
-    # 1. 워드프레스에서 오늘자 뉴스 텍스트 추출
-    source_text = get_today_posts_text()
-    if not source_text:
+    # 1. 워드프레스에서 오늘자 뉴스 내용 추출 (본문 텍스트 포함)
+    posts_data = get_today_posts_content()
+    if not posts_data:
         print("추출된 뉴스 데이터가 없습니다. 종료합니다.")
         return
         
-    print(f"총 텍스트 길이: {len(source_text)} 자")
+    print(f"총 수집된 포스트 개수: {len(posts_data)}")
     
-    # 2. NotebookLM을 통해 팟캐스트 생성
-    podcast_file = await generate_notebooklm_podcast(source_text)
+    # 2. NotebookLM을 통해 팟캐스트 및 슬라이드 초안 생성
+    generated_files = await generate_notebooklm_podcast(posts_data)
     
-    if podcast_file and os.path.exists(podcast_file):
-        # 3. Google Drive 업로드
-        drive_link = upload_to_drive(podcast_file)
-        if drive_link:
-            print(f"성공! 구글 드라이브 링크: {drive_link}")
-        print("모든 작업이 완료되었습니다!")
+    if generated_files:
+        print(f"\n총 {len(generated_files)}개의 파일이 생성되었습니다.")
+        for fpath in generated_files:
+            if os.path.exists(fpath):
+                # 3. Google Drive 업로드
+                drive_link = upload_to_drive(fpath)
+                if drive_link:
+                    print(f"-> {os.path.basename(fpath)} 업로드 완료: {drive_link}")
+        
+        print("\n모든 작업이 성공적으로 완료되었습니다!")
     else:
-        print("팟캐스트 파일 생성에 실패했습니다.")
+        print("파일 생성에 실패했습니다.")
 
 if __name__ == '__main__':
     asyncio.run(main())

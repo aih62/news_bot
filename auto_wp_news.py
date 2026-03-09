@@ -305,11 +305,11 @@ def post_to_wordpress(news_data, original_news_list):
     if not target_image: target_image = get_image_from_webpage(source_url)
     if not target_image: target_image = news_data.get('image_url')
 
-    # 2. 이미지 업로드 시도 (실패 시 보장된 백업 ID 사용)
+    # 2. 이미지 업로드 시도 (실패 시 0을 할당하여 FIFU가 외부 URL을 사용하도록 함)
     media_id = upload_media_from_url(target_image)
     if not media_id:
-        print(f"  -> 업로드 실패 혹은 이미지 없음. 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
-        media_id = GUARANTEED_MEDIA_ID
+        print(f"  -> 업로드 실패 혹은 이미지 없음. 특성 이미지 ID를 0으로 설정하여 FIFU가 작동하도록 합니다.")
+        media_id = 0
 
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]

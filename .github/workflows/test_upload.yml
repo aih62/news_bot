@@ -1,0 +1,57 @@
+name: Test Image Upload to WordPress
+
+on:
+  workflow_dispatch: # 직접 실행 버튼 클릭 시 실행
+
+jobs:
+  test_upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: pip install requests feedparser python-dotenv
+
+      - name: Run Test Upload
+        env:
+          WP_USERNAME: ${{ secrets.WP_USERNAME }}
+          WP_APP_PASSWORD: ${{ secrets.WP_APP_PASSWORD }}
+          WP_SITE_URL: ${{ secrets.WP_SITE_URL }}
+        run: |
+          python -c "
+          import requests, os, re, time
+          from requests.auth import HTTPBasicAuth
+          import urllib3
+          urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+          
+          # auto_wp_news.py의 최신 로직을 그대로 가져옴
+          def upload_test(image_url):
+              url = os.getenv('WP_SITE_URL').rstrip('/')
+              auth = HTTPBasicAuth(os.getenv('WP_USERNAME'), os.getenv('WP_APP_PASSWORD'))
+              clean_filename = re.sub(r'[^a-zA-Z0-9]', '_', image_url.split('/')[-1].split('?')[0])
+              filename = f'{clean_filename[:30]}.jpg'
+              
+              print(f'Trying to upload: {image_url}')
+              img_res = requests.get(image_url, timeout=30, verify=False)
+              if img_res.status_code == 200:
+                  headers = {'Content-Disposition': f'attachment; filename={filename}', 'Content-Type': img_res.headers.get('Content-Type', 'image/jpeg')}
+                  up_res = requests.post(f'{url}/wp-json/wp/v2/media', auth=auth, headers=headers, data=img_res.content, timeout=40, verify=False)
+                  if up_res.status_code in [200, 201]:
+                      print(f'SUCCESS! Media ID: {up_res.json().get(\"id\")}')
+                      return True
+                  else:
+                      print(f'UPLOAD FAILED! Status: {up_res.status_code}')
+              else:
+                  print(f'DOWNLOAD FAILED! Status: {img_res.status_code}')
+              return False
+
+          # 테스트용 이미지 URL (The Hacker News 등 안정적인 소스 선택)
+          test_url = 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhBw-CldP1FbyOXvJqoX3p-J6QQbtYRACj95MIqX7KakiKKyLMYE4lYpQm6eY7S5sGhsAp8vYbM2ZwPJT59JdjSnGyybDhNucYaymCijGQfyx_cJwkpBZGQ7Mgk2kiCALQU4qZ6i6q0SPo2cBEQHt8j6XX8RQo3kvQ9mj1W3DVP2ZoNF7ZkF7dsdJD9gVZI/s1600/critical.png'
+          upload_test(test_url)
+          "

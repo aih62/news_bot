@@ -12,17 +12,18 @@ from urllib.parse import quote, urljoin
 PERPLEXITY_API_KEY = os.getenv("PERPLEXITY_API_KEY")
 WP_USERNAME = os.getenv("WP_USERNAME")
 if not WP_USERNAME:
-    WP_USERNAME = "inhoe.an@gmail.com" # 성공 확인된 계정명
+    WP_USERNAME = "inhoe.an@gmail.com"
 WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
 
-# WP_SITE_URL이 비어있거나 None인 경우를 대비한 처리
+# WP_SITE_URL 설정
 WP_SITE_URL = os.getenv("WP_SITE_URL")
 if not WP_SITE_URL:
     WP_SITE_URL = "https://ajken.mycafe24.com"
 WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
-# 기본 이미지 URL (이미지가 없을 때 사용 - 보안 뉴스에 어울리는 이미지)
-DEFAULT_IMAGE_URL = "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?auto=format&fit=crop&q=80&w=1000"
+# 보장된 기본 이미지 ID (워드프레스 미디어 라이브러리 내 실제 ID)
+GUARANTEED_MEDIA_ID = 3221 
+DEFAULT_IMAGE_URL = "http://ajken.mycafe24.com/wp-content/uploads/2026/03/thedigitalartist-security-4868167_1920.jpg"
 
 # 공통 헤더
 COMMON_HEADERS = {
@@ -30,6 +31,12 @@ COMMON_HEADERS = {
 }
 session = requests.Session()
 session.headers.update(COMMON_HEADERS)
+
+def init_session():
+    try:
+        res = session.get(WP_SITE_URL, timeout=10)
+        print(f"세션 초기화 완료 (Status: {res.status_code})")
+    except: pass
 
 def get_recent_post_titles():
     """워드프레스에서 최근 포스팅된 10개의 제목을 가져옵니다."""
@@ -41,7 +48,6 @@ def get_recent_post_titles():
         res = session.get(endpoint, auth=auth, params=params, timeout=20)
         if res.status_code == 200:
             posts = res.json()
-            # HTML 엔티티 복원 (예: &#8211; -> -)
             titles = [html.unescape(post['title']['rendered']) for post in posts]
             print(f"  -> 최근 {len(titles)}개 포스트 제목 로드 완료.")
             return titles
@@ -50,25 +56,28 @@ def get_recent_post_titles():
     return []
 
 def get_image_from_webpage(url):
-    """기사 원본 주소에서 og:image 태그를 추출합니다."""
-    if not url or not url.startswith("http"):
-        return None
-    print(f"원본 페이지에서 이미지 추출 중: {url[:60]}...")
+    """기사 원본 주소에서 og:image 또는 twitter:image 태그를 추출합니다."""
+    if not url or not url.startswith("http"): return None
     try:
-        res = requests.get(url, timeout=10, headers=COMMON_HEADERS)
+        res = requests.get(url, timeout=10, headers=COMMON_HEADERS, verify=False)
         if res.status_code == 200:
             html_content = res.text
+            # og:image 추출
             match = re.search(r'<meta [^>]*property=["\']og:image["\'] [^>]*content=["\']([^"\']+)["\']', html_content)
             if not match:
                 match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*property=["\']og:image["\']', html_content)
+            
+            # twitter:image 추출
+            if not match:
+                match = re.search(r'<meta [^>]*name=["\']twitter:image["\'] [^>]*content=["\']([^"\']+)["\']', html_content)
+            if not match:
+                match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*name=["\']twitter:image["\']', html_content)
+            
             if match:
                 img_url = match.group(1)
-                if img_url.startswith('/'):
-                    img_url = urljoin(url, img_url)
-                print(f"  -> 추출 성공: {img_url[:60]}...")
+                if img_url.startswith('/'): img_url = urljoin(url, img_url)
                 return img_url
-    except Exception as e:
-        print(f"  -> 추출 실패: {e}")
+    except: pass
     return None
 
 def get_rss_news():
@@ -87,19 +96,13 @@ def get_rss_news():
     seen_links = set()
 
     def extract_image(entry):
-        if 'media_content' in entry and entry.media_content:
-            return entry.media_content[0]['url']
-        if 'media_thumbnail' in entry and entry.media_thumbnail:
-            return entry.media_thumbnail[0]['url']
+        if 'media_content' in entry and entry.media_content: return entry.media_content[0]['url']
+        if 'media_thumbnail' in entry and entry.media_thumbnail: return entry.media_thumbnail[0]['url']
         content = getattr(entry, 'summary', '') + getattr(entry, 'description', '')
         img_match = re.search(r'<img [^>]*src="([^"]+)"', content)
-        if img_match:
-            return img_match.group(1)
-        return None
+        return img_match.group(1) if img_match else None
 
-    # 1. 보안 전문 매체 직접 RSS 파싱
     for source_name, rss_url in direct_feeds.items():
-        print(f"[{source_name}] 직접 RSS 수집 중...")
         try:
             feed = feedparser.parse(rss_url)
             for entry in feed.entries[:15]:
@@ -112,15 +115,11 @@ def get_rss_news():
                         "rss_image": extract_image(entry)
                     })
                     seen_links.add(entry.link)
-        except Exception as e:
-            print(f"  -> [{source_name}] 읽기 실패: {e}")
+        except: pass
 
-    # 2. 구글 뉴스 키워드 검색
     for category_name, keywords in search_categories.items():
         query = " OR ".join([f'"{k}"' if " " in k else k for k in keywords])
-        encoded_query = quote(query)
-        rss_url = f"https://news.google.com/rss/search?q={encoded_query}&hl=ko&gl=KR&ceid=KR:ko"
-        print(f"[{category_name}] 구글 뉴스 검색 중...")
+        rss_url = f"https://news.google.com/rss/search?q={quote(query)}&hl=ko&gl=KR&ceid=KR:ko"
         try:
             feed = feedparser.parse(rss_url)
             for entry in feed.entries[:15]:
@@ -133,24 +132,18 @@ def get_rss_news():
                         "rss_image": extract_image(entry)
                     })
                     seen_links.add(entry.link)
-        except Exception as e:
-            print(f"  -> [{category_name}] 읽기 실패: {e}")
+        except: pass
             
-    print(f"총 {len(all_entries)}개의 고유 기사 수집 완료.")
+    print(f"총 {len(all_entries)}개의 기사 수집 완료.")
     return all_entries
 
 def analyze_news_with_perplexity(news_list, recent_titles):
-    """Perplexity AI를 사용하여 중복되지 않는 최상급 품질의 뉴스 분석을 수행합니다."""
-    if not news_list:
-        return []
-        
+    """Perplexity AI를 사용하여 최상급 품질의 뉴스 분석을 수행합니다."""
+    if not news_list: return []
     limited_news = news_list[:40]
-    print(f"Perplexity AI 분석 중 ({len(news_list)}개 중 상위 {len(limited_news)}개 기사 분석)...")
+    print(f"Perplexity AI 분석 중 ({len(limited_news)}개 기사 분석)...")
     
-    headers = {
-        "Authorization": f"Bearer {PERPLEXITY_API_KEY}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
 
     prompt = f"""
     너는 글로벌 보안 인텔리전스 기업의 '수석 분석가'이자 친절한 보안 에듀케이터야.
@@ -243,49 +236,41 @@ def analyze_news_with_perplexity(news_list, recent_titles):
         ]
     }
 
-    for attempt in range(2):
-        try:
-            response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=300)
-            if response.status_code == 200:
-                content = response.json()['choices'][0]['message']['content']
-                json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
-                return json.loads(json_match.group()) if json_match else json.loads(content)
-        except Exception as e:
-            print(f"AI 분석 중 예외 발생: {e}")
+    try:
+        response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=300)
+        if response.status_code == 200:
+            content = response.json()['choices'][0]['message']['content']
+            json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
+            return json.loads(json_match.group()) if json_match else json.loads(content)
+    except Exception as e:
+        print(f"AI 분석 중 예외 발생: {e}")
     return []
 
-def init_session():
+def upload_media_from_url(image_url):
+    """이미지를 워드프레스에 업로드하고 ID를 반환합니다."""
+    if not image_url or not image_url.startswith("http"): return None
+    print(f"이미지 업로드 시도: {image_url[:50]}...")
+    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
-        res = session.get(WP_SITE_URL, timeout=10)
-        print(f"세션 초기화 완료 (Status: {res.status_code})")
+        img_res = requests.get(image_url, timeout=20, headers=COMMON_HEADERS)
+        if img_res.status_code != 200: return None
+        content_type = img_res.headers.get('Content-Type', 'image/jpeg')
+        filename = f"news_img_{int(time.time())}.jpg"
+        headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
+        up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=30)
+        if up_res.status_code in [200, 201]: return up_res.json().get('id')
     except: pass
+    return None
 
 def get_or_create_term(taxonomy, name):
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/{taxonomy}"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
         res = session.get(endpoint, auth=auth, params={"search": name}, timeout=20)
-        if res.status_code == 200:
-            for term in res.json():
-                if term['name'] == name: return term['id']
+        if res.status_code == 200 and res.json():
+            return res.json()[0]['id']
         res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20)
         if res.status_code in [200, 201]: return res.json()['id']
-    except: pass
-    return None
-
-def upload_media_from_url(image_url):
-    """이미지를 워드프레스에 업로드하고 ID를 반환합니다."""
-    if not image_url or not image_url.startswith("http"): return None
-    print(f"이미지 업로드 시도: {image_url[:60]}...")
-    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    try:
-        img_res = session.get(image_url, timeout=20)
-        if img_res.status_code != 200: return None
-        content_type = img_res.headers.get('Content-Type', 'image/jpeg')
-        filename = f"news_img_{int(time.time())}.{'png' if 'png' in content_type else 'jpg'}"
-        headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
-        up_res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=30)
-        if up_res.status_code in [200, 201]: return up_res.json().get('id')
     except: pass
     return None
 
@@ -300,48 +285,39 @@ def post_to_wordpress(news_data, original_news_list):
     for item in original_news_list:
         if item['link'] == source_url and item.get('rss_image'):
             target_image = item['rss_image']
-            print("  -> RSS 피드에서 실제 이미지를 찾았습니다.")
             break
-    
-    if not target_image:
-        target_image = get_image_from_webpage(source_url)
-    
-    if not target_image:
-        target_image = news_data.get('image_url')
+    if not target_image: target_image = get_image_from_webpage(source_url)
+    if not target_image: target_image = news_data.get('image_url')
 
-    # 2. 이미지 업로드 (실패 시 디폴트 이미지 사용)
-    # Note: 401 에러 등으로 업로드가 실패하더라도 본문에 직접 삽입하여 보이게 합니다.
+    # 2. 이미지 업로드 시도 (실패 시 보장된 백업 ID 사용)
     media_id = upload_media_from_url(target_image)
     if not media_id:
-        print("  -> 이미지 미디어 라이브러리 업로드 실패 (또는 건너뜀).")
-        media_id = 0 # 0이면 featured_media 설정 안 함
+        print(f"  -> 업로드 실패 혹은 이미지 없음. 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
+        media_id = GUARANTEED_MEDIA_ID
 
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
     tag_ids = [tid for tid in tag_ids if tid]
     
-    # 3. 본문 상단에 이미지 태그 삽입 (가장 확실한 방법)
-    display_image = target_image or DEFAULT_IMAGE_URL
-    img_tag = f'<img src="{display_image}" alt="{news_data["title"]}" style="width: 100%; max-width: 800px; height: auto; display: block; margin: 0 auto 20px auto; border-radius: 8px; border: 1px solid #eee;">'
-    final_content = img_tag + news_data.get('content', '내용 없음')
-    
+    # 3. 포스팅 데이터 구성 (FIFU 메타 데이터 포함)
     payload = {
         "title": news_data['title'],
-        "content": final_content,
+        "content": news_data.get('content', '내용 없음'),
         "status": "publish",
         "categories": [cat_id] if cat_id else [],
         "tags": tag_ids,
         "featured_media": media_id,
         "meta": {
-            "fifu_image_url": display_image,
-            "_featured_image_url": display_image
+            "fifu_image_url": target_image or DEFAULT_IMAGE_URL,
+            "fifu_image_alt": "",
+            "footnotes": ""
         }
     }
     
     try:
         res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30)
         if res.status_code in [200, 201]:
-            print(f"발행 성공! (ID: {res.json().get('id')})")
+            print(f"발행 성공! (확인: {res.json().get('link')})")
         else: print(f"발행 실패: {res.status_code}")
     except Exception as e: print(f"포스팅 예외: {e}")
 
@@ -355,7 +331,7 @@ def main():
     # 2. 뉴스 수집
     news_list = get_rss_news()
     
-    # 3. AI 분석 (중복 제목 리스트 전달)
+    # 3. AI 분석 및 포스팅
     selected_news = analyze_news_with_perplexity(news_list, recent_titles)
     
     if not selected_news:

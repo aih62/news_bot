@@ -8,6 +8,14 @@ import os
 import html
 import urllib3
 from urllib.parse import quote, urljoin
+from dotenv import load_dotenv
+import cloudinary
+import cloudinary.uploader
+from PIL import Image
+import io
+
+# .env 로드
+load_dotenv()
 
 # SSL 경고 무시
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -25,11 +33,20 @@ if not WP_SITE_URL:
     WP_SITE_URL = "https://ajken.mycafe24.com"
 WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
-# 보장된 기본 이미지 ID (워드프레스 미디어 라이브러리 내 실제 ID)
+# Cloudinary 설정
+CLOUDINARY_URL = os.getenv("CLOUDINARY_URL")
+if CLOUDINARY_URL:
+    match = re.match(r"cloudinary://([^:]+):([^@]+)@(.+)", CLOUDINARY_URL)
+    if match:
+        api_key, api_secret, cloud_name = match.groups()
+        cloudinary.config(cloud_name=cloud_name, api_key=api_key, api_secret=api_secret, secure=True)
+        print(f"Cloudinary 설정 로드 완료. (Cloud: {cloud_name})")
+else:
+    print("Cloudinary 설정이 없습니다. 기존 방식으로 동작합니다.")
+
 GUARANTEED_MEDIA_ID = 3221 
 DEFAULT_IMAGE_URL = "http://ajken.mycafe24.com/wp-content/uploads/2026/03/thedigitalartist-security-4868167_1920.jpg"
 
-# 공통 헤더
 COMMON_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
 }
@@ -66,17 +83,11 @@ def get_image_from_webpage(url):
         res = requests.get(url, timeout=10, headers=COMMON_HEADERS, verify=False)
         if res.status_code == 200:
             html_content = res.text
-            # og:image 추출
             match = re.search(r'<meta [^>]*property=["\']og:image["\'] [^>]*content=["\']([^"\']+)["\']', html_content)
             if not match:
                 match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*property=["\']og:image["\']', html_content)
-            
-            # twitter:image 추출
             if not match:
                 match = re.search(r'<meta [^>]*name=["\']twitter:image["\'] [^>]*content=["\']([^"\']+)["\']', html_content)
-            if not match:
-                match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*name=["\']twitter:image["\']', html_content)
-            
             if match:
                 img_url = match.group(1)
                 if img_url.startswith('/'): img_url = urljoin(url, img_url)
@@ -85,16 +96,13 @@ def get_image_from_webpage(url):
     return None
 
 def get_rss_news():
-    """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다."""
-    print("feeds.json 로드 중...")
+    """feeds.json에서 뉴스 목록을 가져옵니다."""
     try:
         with open("feeds.json", "r", encoding="utf-8") as f:
             config = json.load(f)
             direct_feeds = config.get("direct_feeds", {})
             search_categories = config.get("search_categories", {})
-    except Exception as e:
-        print(f"feeds.json 로드 실패: {e}")
-        return []
+    except: return []
 
     all_entries = []
     seen_links = set()
@@ -112,33 +120,11 @@ def get_rss_news():
             for entry in feed.entries[:15]:
                 if entry.link not in seen_links:
                     all_entries.append({
-                        "title": entry.title,
-                        "link": entry.link,
-                        "published": getattr(entry, 'published', time.ctime()),
-                        "search_category": f"Expert_{source_name}",
-                        "rss_image": extract_image(entry)
+                        "title": entry.title, "link": entry.link, "published": getattr(entry, 'published', time.ctime()),
+                        "search_category": f"Expert_{source_name}", "rss_image": extract_image(entry)
                     })
                     seen_links.add(entry.link)
         except: pass
-
-    for category_name, keywords in search_categories.items():
-        query = " OR ".join([f'"{k}"' if " " in k else k for k in keywords])
-        rss_url = f"https://news.google.com/rss/search?q={quote(query)}&hl=ko&gl=KR&ceid=KR:ko"
-        try:
-            feed = feedparser.parse(rss_url)
-            for entry in feed.entries[:15]:
-                if entry.link not in seen_links:
-                    all_entries.append({
-                        "title": entry.title,
-                        "link": entry.link,
-                        "published": getattr(entry, 'published', time.ctime()),
-                        "search_category": category_name,
-                        "rss_image": extract_image(entry)
-                    })
-                    seen_links.add(entry.link)
-        except: pass
-            
-    print(f"총 {len(all_entries)}개의 기사 수집 완료.")
     return all_entries
 
 def analyze_news_with_perplexity(news_list, recent_titles):
@@ -250,23 +236,40 @@ def analyze_news_with_perplexity(news_list, recent_titles):
         print(f"AI 분석 중 예외 발생: {e}")
     return []
 
-def upload_media_from_url(image_url):
-    """이미지를 워드프레스에 업로드하고 ID를 반환합니다. (복원된 초기 방식)"""
+def upload_to_cloudinary(image_url):
+    """이미지를 Cloudinary에 업로드 (본문용 고화질)"""
+    if not CLOUDINARY_URL or not image_url or not image_url.startswith("http"): return None
+    try:
+        print(f"Cloudinary 업로드 시도 (본문용): {image_url[:50]}...")
+        response = cloudinary.uploader.upload(image_url, folder="news_bot")
+        return response.get('secure_url')
+    except Exception as e: print(f"Cloudinary 실패: {e}"); return None
+
+def upload_tiny_thumbnail_to_wp(image_url):
+    """이미지를 초경량으로 압축하여 워드프레스에 업로드 (목록용 썸네일)"""
     if not image_url or not image_url.startswith("http"): return None
-    print(f"이미지 업로드 시도: {image_url[:50]}...")
+    print(f"워드프레스 초경량 썸네일 업로드 시도: {image_url[:50]}...")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
-        # 3월 9일 오전 성공 시점과 유사한 단순 로직 + 안전 장치 추가
         img_res = requests.get(image_url, timeout=30, headers=COMMON_HEADERS, verify=False)
         if img_res.status_code != 200: return None
-        
-        content_type = img_res.headers.get('Content-Type', 'image/jpeg')
-        filename = f"news_img_{int(time.time())}.jpg"
-        headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
-        
-        up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=40, verify=False)
-        if up_res.status_code in [200, 201]: return up_res.json().get('id')
-    except: pass
+        img = Image.open(io.BytesIO(img_res.content))
+        if img.mode != 'RGB': img = img.convert('RGB')
+        max_width = 400
+        w_percent = (max_width / float(img.size[0]))
+        h_size = int((float(img.size[1]) * float(w_percent)))
+        img = img.resize((max_width, h_size), Image.Resampling.LANCZOS)
+        output = io.BytesIO()
+        img.save(output, format='JPEG', quality=60, optimize=True)
+        img_data = output.getvalue()
+        filename = f"thumb_{int(time.time())}.jpg"
+        headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": "image/jpeg"}
+        up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_data, timeout=40, verify=False)
+        if up_res.status_code in [200, 201]: 
+            media_id = up_res.json().get('id')
+            print(f"  -> 썸네일 업로드 성공 (ID: {media_id}, {len(img_data)//1024}KB)")
+            return media_id
+    except Exception as e: print(f"썸네일 업로드 실패: {e}")
     return None
 
 def get_or_create_term(taxonomy, name):
@@ -274,19 +277,16 @@ def get_or_create_term(taxonomy, name):
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
         res = session.get(endpoint, auth=auth, params={"search": name}, timeout=20, verify=False)
-        if res.status_code == 200 and res.json():
-            return res.json()[0]['id']
+        if res.status_code == 200 and res.json(): return res.json()[0]['id']
         res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20, verify=False)
         if res.status_code in [200, 201]: return res.json()['id']
     except: pass
     return None
 
 def post_to_wordpress(news_data, original_news_list):
-    """뉴스를 워드프레스에 포스팅합니다. (복원된 초기 방식)"""
+    """최종 하이브리드 포스팅 로직 (중복 노출 해결 버전)"""
     print(f"--- 포스팅 시도: {news_data['title']} ---")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    
-    # 1. 실제 이미지 주소 결정
     target_image = None
     source_url = news_data.get('source_url')
     for item in original_news_list:
@@ -296,60 +296,49 @@ def post_to_wordpress(news_data, original_news_list):
     if not target_image: target_image = get_image_from_webpage(source_url)
     if not target_image: target_image = news_data.get('image_url')
 
-    # 2. 이미지 업로드 시도
-    media_id = upload_media_from_url(target_image)
+    high_res_url = None
+    media_id = 0
+    if target_image:
+        high_res_url = upload_to_cloudinary(target_image)
+        media_id = upload_tiny_thumbnail_to_wp(target_image)
+        
     if not media_id:
-        print(f"  -> 업로드 실패 혹은 이미지 없음. 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
         media_id = GUARANTEED_MEDIA_ID
+        if not high_res_url: high_res_url = DEFAULT_IMAGE_URL
+
+    # 중복 노출 방지를 위한 CSS + 본문 구성
+    # CoverNews 테마의 post-thumbnail 영역을 본문 내에서만 숨깁니다.
+    style_tag = '<style>.single .post-thumbnail { display: none !important; }</style>'
+    content_with_img = style_tag
+    content_with_img += f'<img src="{high_res_url}" alt="{news_data["title"]}" style="width:100%; max-width:800px; height:auto; display:block; margin:0 auto 20px auto; border-radius:10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">'
+    content_with_img += news_data.get('content', '내용 없음')
 
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
     tag_ids = [tid for tid in tag_ids if tid]
     
-    # 3. 포스팅 데이터 구성
     payload = {
-        "title": news_data['title'],
-        "content": news_data.get('content', '내용 없음'),
-        "status": "publish",
-        "categories": [cat_id] if cat_id else [],
-        "tags": tag_ids,
-        "featured_media": media_id,
-        "meta": {
-            "fifu_image_url": target_image or DEFAULT_IMAGE_URL,
-            "fifu_image_alt": "",
-            "footnotes": ""
-        }
+        "title": news_data['title'], "content": content_with_img, "status": "publish",
+        "categories": [cat_id] if cat_id else [], "tags": tag_ids, "featured_media": media_id,
+        "meta": {"fifu_image_url": high_res_url}
     }
     
     try:
         res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30, verify=False)
-        if res.status_code in [200, 201]:
-            print(f"발행 성공! (확인: {res.json().get('link')})")
+        if res.status_code in [200, 201]: print(f"발행 성공! {res.json().get('link')}")
         else: print(f"발행 실패: {res.status_code}")
     except Exception as e: print(f"포스팅 예외: {e}")
 
 def main():
     if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]): return
     init_session()
-    
-    # 1. 최근 포스팅된 10개 제목 가져오기
     recent_titles = get_recent_post_titles()
-    
-    # 2. 뉴스 수집
     news_list = get_rss_news()
-    
-    # 3. AI 분석 및 포스팅
     selected_news = analyze_news_with_perplexity(news_list, recent_titles)
-    
-    if not selected_news:
-        print("선정된 뉴스가 없습니다.")
-        return
-        
-    for news in selected_news:
-        try:
-            post_to_wordpress(news, news_list)
-            time.sleep(5)
-        except Exception as e: print(f"처리 중 오류: {e}")
+    if not selected_news: return
+    for news in selected_news[:3]: # 테스트를 위해 일단 3개만 실행
+        post_to_wordpress(news, news_list)
+        time.sleep(5)
 
 if __name__ == "__main__":
     main()

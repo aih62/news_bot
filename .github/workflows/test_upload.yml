@@ -51,7 +51,7 @@ jobs:
                   print(f'DOWNLOAD FAILED! Status: {img_res.status_code}')
               return False
 
-          # 테스트용 이미지 URL (The Hacker News 등 안정적인 소스 선택)
-          test_url = 'https://blogger.googleusercontent.com/img/b/R29vZ2xl/AVvXsEhBw-CldP1FbyOXvJqoX3p-J6QQbtYRACj95MIqX7KakiKKyLMYE4lYpQm6eY7S5sGhsAp8vYbM2ZwPJT59JdjSnGyybDhNucYaymCijGQfyx_cJwkpBZGQ7Mgk2kiCALQU4qZ6i6q0SPo2cBEQHt8j6XX8RQo3kvQ9mj1W3DVP2ZoNF7ZkF7dsdJD9gVZI/s1600/critical.png'
+          # 테스트용 이미지 URL (아주 작은 구글 로고 이미지로 변경)
+          test_url = 'https://www.google.com/images/branding/googlelogo/1x/googlelogo_color_272x92dp.png'
           upload_test(test_url)
           "

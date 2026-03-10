@@ -1,46 +1,52 @@
-# News Bot 프로젝트 설정 및 대화 기록 (2026-03-09 업데이트)
+# News Bot 프로젝트 설정 및 대화 기록 (2026-03-06)
 
 ## 1. 개요
-본 문서는 워드프레스 자동 뉴스 포스팅 시스템의 이미지 추출 및 업로드 문제 해결 과정을 기록한 문서입니다.
+본 문서는 워드프레스 자동 뉴스 포스팅 시스템의 실행 시간 변경 및 카카오톡 알림 서비스 구축 과정을 기록한 문서입니다.
 
-## 2. 주요 변경 및 개선 사항 (2026-03-09)
+## 2. 주요 변경 사항
+### 2.1 워드프레스 포스팅 스케줄 변경
+- **기존:** 매일 오전 8:00 (KST)
+- **변경:** 매일 오전 7:00 (KST)
+- **수정 파일:** `.github/workflows/daily_post.yml` (cron: `0 22 * * *`)
 
-### 2.1 이미지 추출 로직 강화 (`auto_wp_news.py`)
-- **문제**: 일부 사이트(예: KrebsOnSecurity)에서 `og:image` 대신 `twitter:image`를 사용하여 이미지가 누락됨.
-- **해결**: `get_image_from_webpage` 함수에 `twitter:image` 정규표현식 추출 로직 추가.
-- **안전성**: 이미지 다운로드 시 SSL 인증서 검증을 무시(`verify=False`)하여 인증서 오류가 있는 사이트 대응.
+### 2.2 카카오톡 알림 시스템 구축
+- **기능:** 매일 오전 8:40에 당일 포스팅된 뉴스 10개를 요약하여 카카오톡 '나에게 보내기'로 전송.
+- **신규 파일:** 
+  - `kakao_summary.py`: 포스트 수집, 메시지 가공 및 카카오 API 전송 로직.
+  - `.github/workflows/kakao_notify.yml`: 오전 8:40 자동 실행 워크플로우.
+  - `requirements.txt`: `beautifulsoup4` 라이브러리 추가.
 
-### 2.2 업로드 실패 및 500 에러 해결
-- **현상**: 관리자 페이지에서는 이미지가 보이나, 실제 발행 글에서는 기본 이미지만 노출됨.
-- **원인**: 카페24 호스팅 용량 부족으로 인해 워드프레스 미디어 라이브러리 업로드 시 `500 Internal Server Error` 발생.
-- **조치**: 
-  - 호스팅 용량 증설 완료.
-  - 업로드 타임아웃을 30~40초로 연장하여 고해상도 이미지 처리 안정화.
+## 3. 카카오톡 API 설정 가이드
+1. **카카오 개발자 센터(https://developers.kakao.com/)** 접속.
+2. **애플리케이션 생성:** REST API 키 복사.
+3. **플랫폼 등록:** [앱 키] 하위의 [Redirect URI]에 `https://localhost` 등록.
+4. **카카오 로그인 활성화:** [제품 설정] > [카카오 로그인] > 사용 설정 ON.
+5. **동의 항목 설정:** [동의항목] > '카카오톡 메시지 전송(Talk Message)'를 '이용 중 동의'로 설정.
 
-### 2.3 이미지 노출 방식 최적화
-- **시도**: 서버 용량 절약을 위해 FIFU(외부 URL 방식) 모드 전환 시도 (ID: 0 할당).
-- **결과**: 사용 중인 테마가 특성 이미지 ID가 0일 경우 이미지를 출력하지 않는 문제 발생.
-- **최종 결정**: 가장 성공적이었던 **3월 9일 오전 7시 시점의 "서버 직접 업로드" 방식**으로 로직 복원.
+## 4. GitHub Secrets 등록 정보
+GitHub 저장소의 **Settings > Secrets and variables > Actions**에 다음 항목을 반드시 등록해야 합니다.
 
-## 3. 신규 및 임시 파일 목록
-- `simulate_news.py`: 워드프레스 포스팅 없이 뉴스 수집 및 이미지 추출만 테스트하는 시뮬레이터.
-- `check_post_data.py`: 워드프레스 REST API를 통해 포스트의 미디어 ID 및 메타데이터를 정밀 조회하는 도구.
-- `recover_images.yml` (삭제됨): 이미지가 누락된 기존 포스트들을 일괄 복구하기 위한 일회용 워크플로우.
-- `test_upload.yml` (삭제됨): 서버 환경에서 이미지 업로드만 독립적으로 테스트하기 위한 워크플로우.
+### ① KAKAO_REST_API_KEY
+- **Value:** `bc44d4bf7a10ac566503189f9326ef5e`
 
-## 4. 최종 성공 로직 (Current Version)
-- **이미지 결정**: RSS 메타데이터 -> 웹페이지(`og`/`twitter`) -> AI 추천 URL 순으로 탐색.
-- **업로드**: SSL 검증 무시, 30초 이상의 타임아웃, 파일명 정규화 적용.
-- **백업**: 업로드 최종 실패 시 기본 미디어 ID(`3221`)를 할당하여 '이미지 없음' 현상 방지.
+### ② KAKAO_TOKEN_JSON
+- **Value:**
+```json
+{
+  "access_token": "4UU5EkSUbDeTEcg_-mUJd7bATyJfYihpAAAAAQoXIiAAAAGcwTTa586SpOckXrb0",
+  "refresh_token": "QhqmDfkzvjE8CFYubDHFwsRirPRvKm1IAAAAAgoXIiAAAAGcwTTa4M6SpOckXrb0"
+}
+```
 
-## 5. 향후 과제: 저장 공간 최적화 (2026-03-09 논의)
-- **문제**: 카페24 웹호스팅 저장 공간 부족 및 증설 비용 부담.
-- **결정**: **전략 3 (외부 이미지 서버 활용)** 도입 예정.
-- **계획**: 
-  1. Cloudinary 등 무료 이미지 호스팅 서비스 연동.
-  2. 뉴스 이미지를 수집 즉시 외부 서버로 업로드하고, 워드프레스에는 외부 링크(URL)만 전달.
-  3. 이를 통해 카페24 서버 용량 사용량을 0에 가깝게 유지.
-- **준비 사항**: Cloudinary API 정보(Cloud Name, API Key, API Secret) 확보 및 FIFU 설정 확인.
+### ③ WP_SITE_URL
+- **Value:** `https://ajken.mycafe24.com`
+
+## 5. 작업 파일 목록
+- `auto_wp_news.py`: 워드프레스 포스팅 메인 스크립트.
+- `kakao_summary.py`: 카카오톡 전송 스크립트 (신규).
+- `requirements.txt`: 라이브러리 목록.
+- `.github/workflows/daily_post.yml`: 포스팅 자동화 (수정).
+- `.github/workflows/kakao_notify.yml`: 카카오 알림 자동화 (신규).
 
 ---
-*본 파일은 Gemini CLI에 의해 2026-03-09에 최종 업데이트되었습니다.*
+*본 파일은 Gemini CLI에 의해 자동 생성되었습니다.*

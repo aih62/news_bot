@@ -309,8 +309,13 @@ def post_to_wordpress(news_data, original_news_list):
     # 중복 노출 방지를 위한 CSS + 본문 구성
     # CoverNews 테마의 post-thumbnail 영역을 본문 내에서만 숨깁니다.
     style_tag = '<style>.single .post-thumbnail { display: none !important; }</style>'
+    
+    # 이미지 제목(alt)에 따옴표가 있어도 깨지지 않도록 처리
+    safe_title = html.escape(news_data['title'])
+    
+    # 워드프레스 표준 클래스 추가 (aligncenter, size-full)로 모바일 대응력 향상
     content_with_img = style_tag
-    content_with_img += f'<img src="{high_res_url}" alt="{news_data["title"]}" style="width:100%; max-width:800px; height:auto; display:block; margin:0 auto 20px auto; border-radius:10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">'
+    content_with_img += f'<img src="{high_res_url}" alt="{safe_title}" class="aligncenter size-full wp-post-image" style="width:100%; max-width:800px; height:auto; display:block; margin:0 auto 20px auto; border-radius:10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">'
     content_with_img += news_data.get('content', '내용 없음')
 
     cat_id = get_or_create_term("categories", news_data.get('category', 'News'))

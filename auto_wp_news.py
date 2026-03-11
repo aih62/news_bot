@@ -8,6 +8,10 @@ import os
 import html
 import urllib3
 from urllib.parse import quote, urljoin
+from dotenv import load_dotenv
+
+# .env 파일 로드
+load_dotenv()
 
 # SSL 경고 무시
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -251,12 +255,11 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     return []
 
 def upload_media_from_url(image_url):
-    """이미지를 워드프레스에 업로드하고 ID를 반환합니다. (복원된 초기 방식)"""
+    """이미지를 워드프레스에 업로드하고 ID를 반환합니다. (A1 직접 업로드 방식)"""
     if not image_url or not image_url.startswith("http"): return None
     print(f"이미지 업로드 시도: {image_url[:50]}...")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
-        # 3월 9일 오전 성공 시점과 유사한 단순 로직 + 안전 장치 추가
         img_res = requests.get(image_url, timeout=30, headers=COMMON_HEADERS, verify=False)
         if img_res.status_code != 200: return None
         
@@ -270,23 +273,26 @@ def upload_media_from_url(image_url):
     return None
 
 def get_or_create_term(taxonomy, name):
+    """태그 생성 전용 함수 (카테고리는 고정 ID 사용)"""
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/{taxonomy}"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
         res = session.get(endpoint, auth=auth, params={"search": name}, timeout=20, verify=False)
         if res.status_code == 200 and res.json():
             return res.json()[0]['id']
-        res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20, verify=False)
-        if res.status_code in [200, 201]: return res.json()['id']
+        # 카테고리는 생성하지 않고 태그만 생성
+        if taxonomy == "tags":
+            res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20, verify=False)
+            if res.status_code in [200, 201]: return res.json()['id']
     except: pass
     return None
 
 def post_to_wordpress(news_data, original_news_list):
-    """뉴스를 워드프레스에 포스팅합니다. (복원된 초기 방식)"""
+    """뉴스를 워드프레스에 포스팅합니다. (News 카테고리 ID 21 고정 및 직접 업로드 방식)"""
     print(f"--- 포스팅 시도: {news_data['title']} ---")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
-    # 1. 실제 이미지 주소 결정
+    # 1. 이미지 결정
     target_image = None
     source_url = news_data.get('source_url')
     for item in original_news_list:
@@ -296,40 +302,40 @@ def post_to_wordpress(news_data, original_news_list):
     if not target_image: target_image = get_image_from_webpage(source_url)
     if not target_image: target_image = news_data.get('image_url')
 
-    # 2. 이미지 업로드 시도
+    # 2. 이미지 직접 업로드
     media_id = upload_media_from_url(target_image)
     if not media_id:
-        print(f"  -> 업로드 실패 혹은 이미지 없음. 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
+        print(f"  -> 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
         media_id = GUARANTEED_MEDIA_ID
 
-    cat_id = get_or_create_term("categories", news_data.get('category', 'News'))
+    # 3. 카테고리 ID 21 (News) 및 태그 설정
+    cat_id = 21
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
     tag_ids = [tid for tid in tag_ids if tid]
     
-    # 3. 포스팅 데이터 구성
+    # 4. 포스팅 데이터 구성
     payload = {
         "title": news_data['title'],
         "content": news_data.get('content', '내용 없음'),
         "status": "publish",
-        "categories": [cat_id] if cat_id else [],
+        "categories": [cat_id], # 'News' 카테고리 고정
         "tags": tag_ids,
-        "featured_media": media_id,
-        "meta": {
-            "fifu_image_url": target_image or DEFAULT_IMAGE_URL,
-            "fifu_image_alt": "",
-            "footnotes": ""
-        }
+        "featured_media": media_id
     }
     
     try:
         res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30, verify=False)
         if res.status_code in [200, 201]:
-            print(f"발행 성공! (확인: {res.json().get('link')})")
-        else: print(f"발행 실패: {res.status_code}")
-    except Exception as e: print(f"포스팅 예외: {e}")
+            print(f"발행 성공! (카테고리: News, 확인: {res.json().get('link')})")
+        else:
+            print(f"발행 실패: {res.status_code} - {res.text}")
+    except Exception as e:
+        print(f"포스팅 예외: {e}")
 
 def main():
-    if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]): return
+    if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):
+        print("필수 환경 변수가 설정되어 있지 않습니다.")
+        return
     init_session()
     
     # 1. 최근 포스팅된 10개 제목 가져오기

@@ -2,8 +2,8 @@ name: KakaoTalk News Notification
 
 on:
   schedule:
-    # 매일 한국 시간 오전 8시 40분 (UTC 전날 23:40)에 실행
-    - cron: '40 23 * * *'
+    # 매일 한국 시간 오전 8시 (UTC 전날 23:00)에 실행
+    - cron: '0 23 * * *'
   workflow_dispatch: # 직접 실행 버튼
 
 jobs:

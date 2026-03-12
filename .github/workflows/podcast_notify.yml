@@ -2,8 +2,8 @@ name: Podcast News Notification
 
 on:
   schedule:
-    # 매일 한국 시간 오전 8시 45분 (UTC 전날 23:45)에 실행 (kakao_notify 직후)
-    - cron: '45 23 * * *'
+    # 매일 한국 시간 오전 8시 5분 (UTC 전날 23:05)에 실행 (kakao_notify 직후)
+    - cron: '5 23 * * *'
   workflow_dispatch: # 직접 실행 버튼
 
 jobs:

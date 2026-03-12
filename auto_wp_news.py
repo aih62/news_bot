@@ -7,6 +7,8 @@ import time
 import os
 import html
 import urllib3
+import io
+from PIL import Image
 from urllib.parse import quote, urljoin
 from dotenv import load_dotenv
 
@@ -254,21 +256,58 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     return []
 
 def upload_media_from_url(image_url):
-    """이미지를 워드프레스에 업로드하고 ID를 반환합니다."""
+    """이미지를 다운로드하여 WebP로 압축한 후 워드프레스에 업로드하고 ID를 반환합니다."""
     if not image_url or not image_url.startswith("http"): return None
-    print(f"이미지 업로드 시도: {image_url[:50]}...")
+    print(f"이미지 처리 및 업로드 시도: {image_url[:50]}...")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     try:
+        # 1. 이미지 다운로드
         img_res = requests.get(image_url, timeout=30, headers=COMMON_HEADERS, verify=False)
         if img_res.status_code != 200: return None
         
-        content_type = img_res.headers.get('Content-Type', 'image/jpeg')
-        filename = f"news_img_{int(time.time())}.jpg"
-        headers = {"Content-Disposition": f"attachment; filename={filename}", "Content-Type": content_type}
+        # 2. Pillow를 이용한 이미지 최적화 (WebP 변환 및 압축)
+        img = Image.open(io.BytesIO(img_res.content))
         
-        up_res = requests.post(f"{WP_SITE_URL}/wp-json/wp/v2/media", auth=auth, headers=headers, data=img_res.content, timeout=40, verify=False)
-        if up_res.status_code in [200, 201]: return up_res.json().get('id')
-    except: pass
+        # RGBA -> RGB 변환 (WebP/JPEG 호환성)
+        if img.mode in ("RGBA", "P"):
+            img = img.convert("RGB")
+            
+        # 리사이징 (너비 기준 최대 800px)
+        max_width = 800
+        if img.width > max_width:
+            ratio = max_width / float(img.width)
+            new_height = int(float(img.height) * float(ratio))
+            img = img.resize((max_width, new_height), Image.Resampling.LANCZOS)
+            
+        # JPEG 바이트 데이터로 변환 (WebP 대신 호환성 높은 JPEG 사용)
+        jpg_io = io.BytesIO()
+        img.save(jpg_io, format="JPEG", quality=80, optimize=True) # optimize=True로 추가 압축
+        image_data = jpg_io.getvalue()
+        
+        # 3. 워드프레스 업로드
+        filename = f"news_img_{int(time.time())}.jpg"
+        headers = {
+            "Content-Disposition": f"attachment; filename={filename}",
+            "Content-Type": "image/jpeg"
+        }
+        
+        up_res = requests.post(
+            f"{WP_SITE_URL}/wp-json/wp/v2/media",
+            auth=auth,
+            headers=headers,
+            data=image_data,
+            timeout=40,
+            verify=False
+        )
+        
+        if up_res.status_code in [200, 201]:
+            media_id = up_res.json().get('id')
+            print(f"  -> 이미지 최적화 업로드 완료 (ID: {media_id}, 용량: {len(image_data)//1024}KB, 포맷: JPEG)")
+            return media_id
+        else:
+            print(f"  -> 업로드 실패: {up_res.status_code}")
+    except Exception as e:
+        print(f"  -> 이미지 처리 중 예외 발생: {e}")
     return None
 
 def get_or_create_term(taxonomy, name):
@@ -291,7 +330,7 @@ def get_or_create_term(taxonomy, name):
     return None
 
 def post_to_wordpress(news_data, original_news_list):
-    """뉴스를 워드프레스에 포스팅합니다."""
+    """뉴스를 워드프레스에 포스팅합니다. (FIFU 외부 이미지 연동 방식)"""
     print(f"--- 포스팅 시도: {news_data['title']} ---")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
@@ -304,9 +343,18 @@ def post_to_wordpress(news_data, original_news_list):
     if not target_image: target_image = get_image_from_webpage(source_url)
     if not target_image: target_image = news_data.get('image_url')
 
-    media_id = upload_media_from_url(target_image)
-    if not media_id:
-        print(f"  -> 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
+    # 본문 내용 가져오기
+    content_body = news_data.get('content', '내용 없음')
+
+    # 전략 6: 외부 이미지가 있다면 본문 상단에 <img> 태그 삽입 (FIFU가 이를 감지하여 특성 이미지로 설정)
+    if target_image and target_image.startswith("http"):
+        print(f"  -> 외부 이미지 URL 사용: {target_image[:60]}...")
+        # 숨겨진 이미지 태그 삽입 (FIFU 감지용, 중복 노출 방지)
+        img_tag = f'<p style="display:none;"><img src="{target_image}" alt="{news_data["title"]}"></p>'
+        content_body = img_tag + content_body
+        media_id = 0 # 외부 이미지를 사용하므로 워드프레스 미디어 ID는 0(또는 없음)으로 설정
+    else:
+        print(f"  -> 이미지를 찾지 못해 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
         media_id = GUARANTEED_MEDIA_ID
 
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
@@ -314,12 +362,15 @@ def post_to_wordpress(news_data, original_news_list):
     
     payload = {
         "title": news_data['title'],
-        "content": news_data.get('content', '내용 없음'),
+        "content": content_body,
         "status": "publish",
         "categories": [21], # 'News' 카테고리 ID 21 고정
-        "tags": tag_ids,
-        "featured_media": media_id
+        "tags": tag_ids
     }
+    
+    # 미디어 ID가 있는 경우에만 featured_media 필드 추가
+    if media_id > 0:
+        payload["featured_media"] = media_id
     
     try:
         res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30, verify=False)

@@ -225,8 +225,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
       {{
         "title": "뉴스 제목",
         "content": "<h3>서브헤드라인</h3><ul><li>요약내용</li>...</ul><blockquote>전문가코멘트</blockquote><p>출처: <a href='URL' target='_blank'>매체명</a></p>",
-        "category": "News",
-        "tags": ["태그1", "태그2", "태그3"],
+        "tags": ["기사관련키워드1", "기사관련키워드2", "기사관련키워드3", "기사관련키워드4", "기사관련키워드5"],
         "image_url": "직접적인 이미지 파일 URL. 확실하지 않으면 비워둘 것.",
         "source_url": "원본 링크"
       }}
@@ -255,7 +254,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     return []
 
 def upload_media_from_url(image_url):
-    """이미지를 워드프레스에 업로드하고 ID를 반환합니다. (A1 직접 업로드 방식)"""
+    """이미지를 워드프레스에 업로드하고 ID를 반환합니다."""
     if not image_url or not image_url.startswith("http"): return None
     print(f"이미지 업로드 시도: {image_url[:50]}...")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
@@ -273,26 +272,29 @@ def upload_media_from_url(image_url):
     return None
 
 def get_or_create_term(taxonomy, name):
-    """태그 생성 전용 함수 (카테고리는 고정 ID 사용)"""
-    endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/{taxonomy}"
+    """카테고리나 태그의 ID를 가져오거나 없으면 생성합니다."""
+    endpoints = [
+        f"{WP_SITE_URL}/wp-json/wp/v2/{taxonomy}",
+        f"{WP_SITE_URL}/index.php?rest_route=/wp/v2/{taxonomy}"
+    ]
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    try:
-        res = session.get(endpoint, auth=auth, params={"search": name}, timeout=20, verify=False)
-        if res.status_code == 200 and res.json():
-            return res.json()[0]['id']
-        # 카테고리는 생성하지 않고 태그만 생성
-        if taxonomy == "tags":
-            res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20, verify=False)
-            if res.status_code in [200, 201]: return res.json()['id']
-    except: pass
+    for endpoint in endpoints:
+        try:
+            res = session.get(endpoint, auth=auth, params={"search": name}, timeout=20, verify=False)
+            if res.status_code == 200:
+                terms = res.json()
+                for term in terms:
+                    if term['name'] == name: return term['id']
+                post_res = session.post(endpoint, auth=auth, json={"name": name}, timeout=20, verify=False)
+                if post_res.status_code in [200, 201]: return post_res.json()['id']
+        except: continue
     return None
 
 def post_to_wordpress(news_data, original_news_list):
-    """뉴스를 워드프레스에 포스팅합니다. (News 카테고리 ID 21 고정 및 직접 업로드 방식)"""
+    """뉴스를 워드프레스에 포스팅합니다."""
     print(f"--- 포스팅 시도: {news_data['title']} ---")
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
-    # 1. 이미지 결정
     target_image = None
     source_url = news_data.get('source_url')
     for item in original_news_list:
@@ -302,23 +304,19 @@ def post_to_wordpress(news_data, original_news_list):
     if not target_image: target_image = get_image_from_webpage(source_url)
     if not target_image: target_image = news_data.get('image_url')
 
-    # 2. 이미지 직접 업로드
     media_id = upload_media_from_url(target_image)
     if not media_id:
         print(f"  -> 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
         media_id = GUARANTEED_MEDIA_ID
 
-    # 3. 카테고리 ID 21 (News) 및 태그 설정
-    cat_id = 21
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
     tag_ids = [tid for tid in tag_ids if tid]
     
-    # 4. 포스팅 데이터 구성
     payload = {
         "title": news_data['title'],
         "content": news_data.get('content', '내용 없음'),
         "status": "publish",
-        "categories": [cat_id], # 'News' 카테고리 고정
+        "categories": [21], # 'News' 카테고리 ID 21 고정
         "tags": tag_ids,
         "featured_media": media_id
     }
@@ -326,25 +324,19 @@ def post_to_wordpress(news_data, original_news_list):
     try:
         res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30, verify=False)
         if res.status_code in [200, 201]:
-            print(f"발행 성공! (카테고리: News, 확인: {res.json().get('link')})")
-        else:
-            print(f"발행 실패: {res.status_code} - {res.text}")
-    except Exception as e:
-        print(f"포스팅 예외: {e}")
+            print(f"발행 성공! (확인: {res.json().get('link')})")
+        else: print(f"발행 실패: {res.status_code} - {res.text}")
+    except Exception as e: print(f"포스팅 예외: {e}")
 
 def main():
     if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):
-        print("필수 환경 변수가 설정되어 있지 않습니다.")
+        print("필수 환경 변수 누락")
         return
     init_session()
     
-    # 1. 최근 포스팅된 10개 제목 가져오기
     recent_titles = get_recent_post_titles()
-    
-    # 2. 뉴스 수집
     news_list = get_rss_news()
     
-    # 3. AI 분석 및 포스팅
     selected_news = analyze_news_with_perplexity(news_list, recent_titles)
     
     if not selected_news:

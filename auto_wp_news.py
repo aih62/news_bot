@@ -249,8 +249,20 @@ def analyze_news_with_perplexity(news_list, recent_titles):
         response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=300)
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
+            # JSON 리스트 형태를 보다 정확하게 추출 (Markdown 코드 블록 기호 제거 등)
             json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
-            return json.loads(json_match.group()) if json_match else json.loads(content)
+            if json_match:
+                try:
+                    return json.loads(json_match.group())
+                except json.JSONDecodeError:
+                    # JSON 내부의 줄바꿈이나 이스케이프 문자 문제 해결 시도
+                    cleaned_json = re.sub(r'[\x00-\x1F\x7F]', '', json_match.group())
+                    return json.loads(cleaned_json)
+            else:
+                try:
+                    return json.loads(content)
+                except:
+                    print(f"JSON 파싱 실패: {content[:200]}...")
     except Exception as e:
         print(f"AI 분석 중 예외 발생: {e}")
     return []

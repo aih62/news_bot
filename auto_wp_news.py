@@ -4,6 +4,7 @@ import json
 import re
 from requests.auth import HTTPBasicAuth
 import time
+import calendar
 import os
 import html
 import urllib3
@@ -49,11 +50,11 @@ def init_session():
     except: pass
 
 def get_recent_post_titles():
-    """워드프레스에서 최근 포스팅된 10개의 제목을 가져옵니다."""
+    """워드프레스에서 최근 포스팅된 30개의 제목을 가져옵니다."""
     print("최근 포스팅된 뉴스 제목 확인 중...")
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    params = {"per_page": 10, "status": "publish"}
+    params = {"per_page": 30, "status": "publish"}
     try:
         res = session.get(endpoint, auth=auth, params=params, timeout=20, verify=False)
         if res.status_code == 200:
@@ -91,7 +92,7 @@ def get_image_from_webpage(url):
     return None
 
 def get_rss_news():
-    """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다."""
+    """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다 (최근 24시간 이내)."""
     print("feeds.json 로드 중...")
     try:
         with open("feeds.json", "r", encoding="utf-8") as f:
@@ -104,6 +105,10 @@ def get_rss_news():
 
     all_entries = []
     seen_links = set()
+    
+    # 시간 필터링 기준 (현재 시간으로부터 24시간 전)
+    now = time.time()
+    day_in_seconds = 24 * 60 * 60
 
     def extract_image(entry):
         if 'media_content' in entry and entry.media_content: return entry.media_content[0]['url']
@@ -116,7 +121,14 @@ def get_rss_news():
         try:
             feed = feedparser.parse(rss_url)
             for entry in feed.entries[:15]:
-                if entry.link not in seen_links:
+                # 24시간 이내 기사인지 확인
+                is_recent = True
+                if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                    entry_time = calendar.timegm(entry.published_parsed)
+                    if now - entry_time > day_in_seconds:
+                        is_recent = False
+                
+                if is_recent and entry.link not in seen_links:
                     all_entries.append({
                         "title": entry.title,
                         "link": entry.link,
@@ -133,7 +145,14 @@ def get_rss_news():
         try:
             feed = feedparser.parse(rss_url)
             for entry in feed.entries[:15]:
-                if entry.link not in seen_links:
+                # 24시간 이내 기사인지 확인
+                is_recent = True
+                if hasattr(entry, 'published_parsed') and entry.published_parsed:
+                    entry_time = calendar.timegm(entry.published_parsed)
+                    if now - entry_time > day_in_seconds:
+                        is_recent = False
+
+                if is_recent and entry.link not in seen_links:
                     all_entries.append({
                         "title": entry.title,
                         "link": entry.link,
@@ -144,7 +163,7 @@ def get_rss_news():
                     seen_links.add(entry.link)
         except: pass
             
-    print(f"총 {len(all_entries)}개의 기사 수집 완료.")
+    print(f"총 {len(all_entries)}개의 최근(24시간 이내) 기사 수집 완료.")
     return all_entries
 
 def analyze_news_with_perplexity(news_list, recent_titles):

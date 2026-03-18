@@ -14,7 +14,14 @@ sys.path.append(r"C:\Users\inhoe\AppData\Roaming\Python\Python313\site-packages"
 
 # NotebookLM
 from notebooklm import NotebookLMClient
-from notebooklm.types import AudioLength, ReportFormat, SlideDeckFormat, SlideDeckLength, ArtifactType
+from notebooklm.types import (
+    AudioLength, 
+    AudioFormat, 
+    ReportFormat, 
+    SlideDeckFormat, 
+    SlideDeckLength, 
+    ArtifactType
+)
 
 # Google Drive API
 from google.oauth2.credentials import Credentials
@@ -30,6 +37,11 @@ WP_SITE_URL = os.getenv("WP_SITE_URL", "https://ajken.mycafe24.com").rstrip('/')
 
 # If modifying these scopes, delete the file token.json.
 SCOPES = ['https://www.googleapis.com/auth/drive.file']
+
+# NotebookLM Audio Settings from .env
+AUDIO_INSTRUCTIONS = os.getenv("NOTEBOOKLM_AUDIO_INSTRUCTIONS", "전문적인 뉴스 팟캐스트 스타일로 진행해 주세요.")
+AUDIO_FORMAT = os.getenv("NOTEBOOKLM_AUDIO_FORMAT", "deep-dive")
+AUDIO_LENGTH = os.getenv("NOTEBOOKLM_AUDIO_LENGTH", "default")
 
 def get_today_posts_content():
     """워드프레스에서 오늘 날짜의 최신 포스트 10개를 가져와 제목과 본문(텍스트) 목록을 반환합니다."""
@@ -104,11 +116,29 @@ async def generate_notebooklm_podcast(posts_data):
             print(f"팟캐스트(Audio Overview) 생성 요청 중 (한국어)...", flush=True)
             audio_job = None
             try:
-                # 한국어 설정 명시 및 사용자 지침 추가
+                # 환경변수에서 로드한 설정 사용
+                print(f"  -> 프롬프트: {AUDIO_INSTRUCTIONS[:50]}...")
+                
+                # 문자열 설정을 Enum 타입으로 변환
+                final_format = None
+                if AUDIO_FORMAT == "deep-dive": final_format = AudioFormat.DEEP_DIVE
+                elif AUDIO_FORMAT == "brief": final_format = AudioFormat.BRIEF
+                elif AUDIO_FORMAT == "critique": final_format = AudioFormat.CRITIQUE
+                elif AUDIO_FORMAT == "debate": final_format = AudioFormat.DEBATE
+                
+                final_length = None
+                if AUDIO_LENGTH == "short": final_length = AudioLength.SHORT
+                elif AUDIO_LENGTH == "default": final_length = AudioLength.DEFAULT
+                elif AUDIO_LENGTH == "long": final_length = AudioLength.LONG
+
+                print(f"  -> 포맷: {final_format}, 길이: {final_length}")
+                
                 audio_job = await client.artifacts.generate_audio(
                     notebook.id,
                     language="ko",
-                    instructions="한국어로 대화해 주세요. 전문적이고 유익한 뉴스 팟캐스트 스타일로 진행해 주세요."
+                    instructions=AUDIO_INSTRUCTIONS,
+                    audio_format=final_format,
+                    audio_length=final_length
                 )
                 print(f"오디오 생성 작업 시작됨 (Task ID: {audio_job.task_id})", flush=True)
             except Exception as e:

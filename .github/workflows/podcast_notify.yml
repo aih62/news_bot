@@ -24,17 +24,23 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
+
       - name: Restore Authentication Files
         run: |
-          # 1. Google Drive Token
+          # Google Drive Token
           echo '${{ secrets.GDRIVE_TOKEN }}' > token.json
-          
-          # 2. Google Drive Credentials
+          # Google Drive Credentials
           echo '${{ secrets.GDRIVE_CREDENTIALS }}' > credentials.json
+
+      - name: Auto Login to NotebookLM
+        env:
+          GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
+          GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
+        run: python notebooklm_login.py
 
       - name: Generate NotebookLM Podcast and Upload to Drive
         env:
           WP_SITE_URL: ${{ secrets.WP_SITE_URL }}
-          # NotebookLM은 NOTEBOOKLM_AUTH_JSON 환경 변수만 있으면 동작합니다.
-          NOTEBOOKLM_AUTH_JSON: ${{ secrets.NOTEBOOKLM_AUTH_JSON }}
         run: python generate_podcast.py

@@ -9,6 +9,8 @@ on:
 jobs:
   generate_podcast:
     runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
       - name: Checkout code
@@ -38,6 +40,7 @@ jobs:
         env:
           GOOGLE_EMAIL: ${{ secrets.GOOGLE_EMAIL }}
           GOOGLE_PASSWORD: ${{ secrets.GOOGLE_PASSWORD }}
+          NOTEBOOKLM_STORAGE_STATE: ${{ secrets.NOTEBOOKLM_STORAGE_STATE }}
         run: python notebooklm_login.py
 
       - name: Generate NotebookLM Podcast and Upload to Drive

@@ -34,18 +34,14 @@ def save_storage_state_from_env():
 
 
 async def login_to_notebooklm():
-    save_storage_state_from_env()
+    state_restored = save_storage_state_from_env()
     
-    # 만약 이미 storage_state.json이 유효하다면 로그인을 건너뛸 수도 있지만,
-    # 여기서는 환경변수가 있으면 저장만 하고 뒤의 로직은 그대로 두어 
-    # 필요시 로그인을 시도하게 합니다. 단 GitHub Action에서는 로그인이 실패할 확률이 높으므로
-    # 환경변수로 세션을 주입하는 것이 주 목적입니다.
-    
+    if state_restored or STORAGE_PATH.exists():
+        print("기존 세션 정보(storage_state.json)가 존재합니다. 브라우저 자동 로그인을 건너뜁니다.", flush=True)
+        return
+
     if not GOOGLE_PASSWORD:
-        if STORAGE_PATH.exists():
-            print("비밀번호는 없지만 기존 세션 파일이 존재합니다. 로그인을 건너뜁니다.", flush=True)
-            return
-        print("오류: GOOGLE_PASSWORD 환경변수가 설정되지 않았습니다.", flush=True)
+        print("오류: GOOGLE_PASSWORD 환경변수가 설정되지 않았으며 유효한 세션도 없습니다.", flush=True)
         sys.exit(1)
 
     STORAGE_DIR.mkdir(parents=True, exist_ok=True)

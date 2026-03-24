@@ -278,20 +278,74 @@ def authenticate_drive():
             token.write(creds.to_json())
     return creds
 
+def get_or_create_drive_folder(service, folder_name, parent_id=None):
+    """Google Drive에서 폴더를 찾거나 없으면 생성하여 폴더 ID를 반환합니다."""
+    query = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    if parent_id:
+        query += f" and '{parent_id}' in parents"
+    else:
+        # 최상단 폴더 검사 (부모가 없어도 검색되도록)
+        pass
+        
+    results = service.files().list(q=query, spaces='drive', fields='files(id, name)').execute()
+    items = results.get('files', [])
+    
+    # 여러 개가 검색되면 부모 조건 추가 확인
+    if parent_id:
+        items = [i for i in items if parent_id in service.files().get(fileId=i['id'], fields='parents').execute().get('parents', [])]
+    else:
+        # root에 있는 항목을 정확하게 가져오려면 이 조건 필요
+        items = [i for i in items if 'root' in (service.files().get(fileId=i['id'], fields='parents').execute().get('parents', ['root']))]
+        
+    # 위 방식은 다소 비효율적이므로 단순화된 쿼리 재구성
+    query_exact = f"name='{folder_name}' and mimeType='application/vnd.google-apps.folder' and trashed=false"
+    if parent_id:
+        query_exact += f" and '{parent_id}' in parents"
+    else:
+        query_exact += " and 'root' in parents"
+        
+    results_exact = service.files().list(q=query_exact, spaces='drive', fields='files(id, name)').execute()
+    items_exact = results_exact.get('files', [])
+
+    if items_exact:
+        return items_exact[0]['id']
+    else:
+        folder_metadata = {
+            'name': folder_name,
+            'mimeType': 'application/vnd.google-apps.folder'
+        }
+        if parent_id:
+            folder_metadata['parents'] = [parent_id]
+            
+        file = service.files().create(body=folder_metadata, fields='id').execute()
+        return file.get('id')
+
 def upload_to_drive(file_path):
-    """다운로드한 파일을 Google Drive에 업로드합니다."""
+    """다운로드한 파일을 Google Drive의 날짜별 폴더에 업로드합니다."""
     print(f"Google Drive 업로드 시작: {os.path.basename(file_path)}")
     try:
         creds = authenticate_drive()
         service = build('drive', 'v3', credentials=creds)
 
-        file_metadata = {'name': os.path.basename(file_path)}
+        # 1. 메인 폴더 (NewsBot_Artifacts) ID 확인 혹은 생성
+        main_folder_name = "NewsBot_Artifacts"
+        main_folder_id = get_or_create_drive_folder(service, main_folder_name)
+        
+        # 2. 오늘 날짜 하위 폴더 ID 확인 혹은 생성
+        today_str = datetime.now().strftime('%Y-%m-%d')
+        daily_folder_id = get_or_create_drive_folder(service, today_str, parent_id=main_folder_id)
+
+        # 3. 하위 폴더에 파일 업로드
+        file_metadata = {
+            'name': os.path.basename(file_path),
+            'parents': [daily_folder_id]
+        }
         mimetype = 'audio/wav' if file_path.endswith('.wav') else 'text/plain'
         media = MediaFileUpload(file_path, mimetype=mimetype)
         
         file = service.files().create(body=file_metadata, media_body=media,
                                       fields='id, webViewLink').execute()
-        print(f"파일 업로드 성공! 파일 ID: {file.get('id')}")
+        print(f"파일 업로드 성공! 폴더: {today_str}, 파일 ID: {file.get('id')}")
         return file.get('webViewLink')
 
     except Exception as error:

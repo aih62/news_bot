@@ -1,0 +1,484 @@
+/**
+ * 정보보호 통계 대시보드 - 스타일시트
+ * WordPress CoverNews 테마와 충돌 방지를 위해
+ * 모든 클래스명은 'db-' 접두사 사용
+ */
+
+/* ── CSS 변수 ── */
+#db-dashboard-root {
+  --db-bg:       #0a0e1a;
+  --db-surface:  #111827;
+  --db-surface2: #1a2235;
+  --db-border:   rgba(255,255,255,0.07);
+  --db-text:     #e2e8f0;
+  --db-muted:    #64748b;
+  --db-cyan:     #22d3ee;
+  --db-green:    #34d399;
+  --db-blue:     #60a5fa;
+  --db-purple:   #a78bfa;
+  --db-amber:    #f59e0b;
+  --db-red:      #f87171;
+  --db-teal:     #10b981;
+}
+
+/* ── 루트 컨테이너 ── */
+#db-dashboard-root {
+  background: var(--db-bg);
+  color: var(--db-text);
+  font-family: 'Noto Sans KR', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 32px 24px;
+  position: relative;
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+/* 배경 그리드 패턴 */
+#db-dashboard-root::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(34,211,238,0.015) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34,211,238,0.015) 1px, transparent 1px);
+  background-size: 40px 40px;
+  pointer-events: none;
+  z-index: 0;
+}
+
+#db-dashboard-root > * { position: relative; z-index: 1; }
+
+/* ── 헤더 ── */
+.db-header {
+  margin-bottom: 40px;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.db-eyebrow {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--db-cyan);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.db-eyebrow::before {
+  content: '';
+  display: inline-block;
+  width: 20px;
+  height: 2px;
+  background: var(--db-cyan);
+}
+
+.db-title {
+  font-size: clamp(22px, 3vw, 34px);
+  font-weight: 900;
+  letter-spacing: -0.03em;
+  color: #fff;
+  line-height: 1.1;
+  margin: 0 0 4px 0;
+}
+
+.db-title-period {
+  color: var(--db-cyan);
+}
+
+.db-source-label {
+  font-size: 11px;
+  color: var(--db-muted);
+  font-family: 'JetBrains Mono', monospace;
+  text-align: right;
+}
+
+/* ── 공통 타이틀 ── */
+.db-sub-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #fff !important;
+  margin: 40px 0 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  letter-spacing: -0.01em;
+}
+.db-sub-title i {
+  color: var(--db-cyan);
+  font-size: 0.9em;
+  opacity: 0.8;
+}
+
+/* ── 탭 네비게이션 ── */
+.db-nav-wrapper {
+  margin-bottom: 32px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* 메인 카테고리 (1단계) */
+.db-main-nav {
+  display: flex;
+  gap: 8px;
+  border-bottom: 2px solid var(--db-border);
+  padding-bottom: 8px;
+}
+.db-main-tab {
+  padding: 10px 24px;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--db-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  position: relative;
+  transition: all 0.3s;
+}
+.db-main-tab.active {
+  color: var(--db-cyan);
+}
+.db-main-tab.active::after {
+  content: '';
+  position: absolute;
+  bottom: -10px;
+  left: 0;
+  width: 100%;
+  height: 3px;
+  background: var(--db-cyan);
+  box-shadow: 0 0 10px rgba(34,211,238,0.5);
+}
+
+/* 서브 카테고리 (2단계) */
+.db-sub-nav-group {
+  display: none;
+}
+.db-sub-nav-group.active {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  animation: fadeIn 0.3s ease-out;
+}
+
+.db-tab {
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--db-muted);
+  background: var(--db-surface);
+  border: 1px solid var(--db-border);
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.db-tab:hover {
+  background: var(--db-surface2);
+  color: var(--db-text);
+  border-color: var(--db-cyan);
+}
+.db-tab.active {
+  background: var(--db-cyan);
+  color: #000;
+  font-weight: 700;
+  border-color: var(--db-cyan);
+  box-shadow: 0 0 15px rgba(34,211,238,0.3);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 섹션 ── */
+.db-section { display: none; }
+.db-section.active { display: block; }
+
+/* ── KPI 카드 ── */
+.db-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.db-kpi-card {
+  background: var(--db-surface);
+  border: 1px solid var(--db-border);
+  border-radius: 16px;
+  padding: 20px;
+  position: relative;
+  overflow: hidden;
+  transition: transform 0.2s, box-shadow 0.2s;
+  animation: dbFadeUp 0.4s ease both;
+}
+.db-kpi-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.db-kpi-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: var(--db-card-color, var(--db-cyan));
+}
+
+.db-kpi-label {
+  font-size: 12px;
+  color: var(--db-muted);
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+.db-kpi-value {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: clamp(17px, 2.2vw, 24px);
+  font-weight: 700;
+  color: #fff;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+.db-kpi-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 2px 8px;
+  border-radius: 100px;
+  font-weight: 700;
+}
+.db-kpi-badge.up   { background: rgba(52,211,153,0.12); color: #34d399; }
+.db-kpi-badge.down { background: rgba(248,113,113,0.12); color: #f87171; }
+
+.db-kpi-year {
+  font-size: 11px;
+  color: var(--db-muted);
+  margin-top: 4px;
+}
+
+/* ── 차트 카드 ── */
+.db-chart-grid {
+  display: grid;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+.db-chart-grid.two   { grid-template-columns: 1fr 1fr; }
+.db-chart-grid.three { grid-template-columns: 1fr 1fr 1fr; }
+.db-chart-grid.one   { grid-template-columns: 1fr; }
+
+@media (max-width: 900px) {
+  .db-chart-grid.two,
+  .db-chart-grid.three { grid-template-columns: 1fr; }
+  .db-tabs { width: 100%; }
+}
+
+.db-chart-card {
+  background: var(--db-surface);
+  border: 1px solid var(--db-border);
+  border-radius: 16px;
+  padding: 24px;
+  overflow: hidden;
+}
+
+.db-chart-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--db-text);
+  margin-bottom: 4px;
+}
+.db-chart-subtitle {
+  font-size: 11px;
+  color: var(--db-muted);
+  margin-bottom: 20px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.db-chart-wrap          { position: relative; height: 220px; }
+.db-chart-wrap.tall     { height: 280px; }
+.db-chart-wrap.short    { height: 160px; }
+
+/* ── 하이라이트 그리드 ── */
+.db-highlight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 24px;
+}
+.db-highlight-item {
+  background: var(--db-surface2);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+}
+.db-highlight-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--db-cyan);
+  line-height: 1;
+  margin-bottom: 4px;
+}
+.db-highlight-label {
+  font-size: 11px;
+  color: var(--db-muted);
+}
+
+/* ── 인포 블록 ── */
+.db-info-block {
+  background: rgba(34,211,238,0.05);
+  border: 1px solid rgba(34,211,238,0.15);
+  border-radius: 10px;
+  padding: 14px 18px;
+  font-size: 12px;
+  color: var(--db-muted);
+  margin-bottom: 20px;
+}
+.db-info-block strong { color: var(--db-cyan); }
+
+/* ── 테이블 ── */
+.db-table-wrap {
+  overflow-x: auto;
+  margin-top: 10px;
+}
+.db-data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+  color: var(--db-text);
+  text-align: left;
+  min-width: 600px;
+}
+.db-data-table th {
+  background: var(--db-surface2);
+  padding: 12px 16px;
+  font-weight: 700;
+  color: var(--db-cyan);
+  font-size: 11px;
+  text-transform: uppercase;
+  border-bottom: 2px solid var(--db-border);
+}
+.db-data-table td {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--db-border);
+  vertical-align: middle;
+}
+.db-data-table tr:hover {
+  background: rgba(255,255,255,0.02);
+}
+.db-data-table .db-tier-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+}
+.db-data-table .db-tier-1 { background: rgba(34,211,238,0.1); color: var(--db-cyan); }
+.db-data-table .db-tier-2 { background: rgba(167,139,250,0.1); color: var(--db-purple); }
+
+.db-data-table a {
+  color: var(--db-muted);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.db-data-table a:hover {
+  color: var(--db-cyan);
+}
+
+/* ── 애니메이션 ── */
+@keyframes dbFadeUp {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── 인사이트 카드 (핵심 10대 지표) ── */
+.db-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+  margin-top: 24px;
+}
+
+@media (max-width: 1400px) { .db-insight-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (max-width: 1100px) { .db-insight-grid { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 800px)  { .db-insight-grid { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 500px)  { .db-insight-grid { grid-template-columns: 1fr; } }
+
+.db-insight-card {
+  background: var(--db-surface);
+  border: 1px solid var(--db-border);
+  border-radius: 12px;
+  padding: 24px 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  overflow: hidden;
+  height: 100%;
+  cursor: pointer;
+  text-decoration: none !important;
+}
+
+.db-insight-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; width: 100%; height: 3px;
+  background: var(--accent-color, var(--db-cyan));
+}
+
+.db-insight-card:hover {
+  transform: translateY(-4px);
+  background: var(--db-surface2);
+  border-color: var(--accent-color, var(--db-cyan));
+  box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+}
+
+.db-insight-icon {
+  font-size: 1.8rem;
+  color: var(--accent-color, var(--db-cyan));
+  margin-bottom: 12px;
+  opacity: 0.9;
+}
+
+.db-insight-value {
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: #fff;
+  margin-bottom: 6px;
+  letter-spacing: -0.02em;
+}
+
+.db-insight-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--db-text);
+  margin-bottom: 4px;
+  word-break: keep-all;
+}
+
+.db-insight-sub {
+  font-size: 11px;
+  color: var(--db-muted);
+  line-height: 1.4;
+  margin-bottom: 12px;
+  word-break: keep-all;
+}
+
+.db-insight-source {
+  margin-top: auto;
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent-color, var(--db-cyan));
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  opacity: 0.8;
+}

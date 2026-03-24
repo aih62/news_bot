@@ -1,0 +1,192 @@
+<!-- 
+  정보보호 통계 대시보드 - WordPress 페이지 HTML 골격
+-->
+<div id="db-dashboard-root">
+
+  <!-- 헤더 -->
+  <div class="db-header">
+    <div class="db-title">사이버보안 대시보드</div>
+  </div>
+
+  <!-- 네비게이션 -->
+  <div class="db-nav-wrapper">
+    <!-- 1단계: 메인 카테고리 -->
+    <div class="db-main-nav">
+      <button class="db-main-tab active" data-main="overview">📊 종합 현황</button>
+      <button class="db-main-tab" data-main="global">🌍 글로벌 현황</button>
+    </div>
+
+    <!-- 2단계: 서브 카테고리 (종합 현황) -->
+    <div class="db-sub-nav-group active" id="db-sub-overview">
+      <button class="db-tab active" data-section="overview">🏠 개요</button>
+      <button class="db-tab" data-section="industry">🏭 산업</button>
+      <button class="db-tab" data-section="incidents">💥 침해</button>
+      <button class="db-tab" data-section="talent">👨‍💻 인력</button>
+      <button class="db-tab" data-section="cert">📜 인증</button>
+      <button class="db-tab" data-section="prevention">🛡️ 예방</button>
+    </div>
+
+    <!-- 2단계: 서브 카테고리 (글로벌 현황) -->
+    <div class="db-sub-nav-group" id="db-sub-global">
+      <button class="db-tab" data-section="global-economy">📉 경제/추이</button>
+      <button class="db-tab" data-section="global-threat">🎯 공격/위협</button>
+      <button class="db-tab" data-section="global-ai">🤖 AI 분야</button>
+      <button class="db-tab" data-section="global-deep">🔍 심층 분석</button>
+    </div>
+  </div>
+
+  <!-- ===== [종합] 개요 ===== -->
+  <div id="db-section-overview" class="db-section active">
+    <!-- Content logic mirror page-market-status.php (Simplified for HTML snippet) -->
+    <div class="db-kpi-grid" id="db-kpi-container"></div>
+    <!-- ... same structure as PHP file ... -->
+  </div>
+
+  <!-- Note: When deploying to WordPress, the backend JS renders into these containers. -->
+  <div id="db-section-industry" class="db-section"></div>
+  <div id="db-section-incidents" class="db-section"></div>
+  <div id="db-section-talent" class="db-section"></div>
+  <div id="db-section-cert" class="db-section"></div>
+  <div id="db-section-prevention" class="db-section"></div>
+
+  <div id="db-section-global-deep" class="db-section">
+    <h3 class="db-sub-title"><i class="fas fa-bullseye"></i> 2025 국가별 사이버 공격 타겟 순위</h3>
+    <div class="db-chart-card">
+        <div class="db-table-scroll">
+            <table class="db-data-table">
+                <thead>
+                    <tr>
+                        <th style="width:60px">순위</th>
+                        <th style="width:120px">대상 국가</th>
+                        <th>주요 공격 원인 및 지표</th>
+                    </tr>
+                </thead>
+                <tbody id="db-c-table-targeted"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <h3 class="db-sub-title"><i class="fas fa-industry"></i> 산업별 사이버 위협 심층 분석</h3>
+    <div class="db-chart-grid two">
+        <div class="db-chart-card">
+            <div class="db-chart-title">글로벌 랜섬웨어 산업별 비중 (24 Q2)</div>
+            <div class="db-table-scroll">
+                <table class="db-data-table">
+                    <thead>
+                        <tr>
+                            <th>순위</th>
+                            <th>산업분야</th>
+                            <th>비중</th>
+                            <th>증감</th>
+                            <th>특징</th>
+                        </tr>
+                    </thead>
+                    <tbody id="db-c-table-industry-share"></tbody>
+                </table>
+            </div>
+        </div>
+        <div class="db-chart-card">
+            <div class="db-chart-title">글로벌 랜섬웨어 산업별 공격 건수 (25E)</div>
+            <div class="db-table-scroll">
+                <table class="db-data-table">
+                    <thead>
+                        <tr>
+                            <th>순위</th>
+                            <th>산업분야</th>
+                            <th>공격건수</th>
+                            <th>증감</th>
+                            <th>비고</th>
+                        </tr>
+                    </thead>
+                    <tbody id="db-c-table-industry-count"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <h3 class="db-sub-title"><i class="fas fa-flag"></i> 국내(한국) 산업별 위협 순위 (2025 상반기)</h3>
+    <div class="db-chart-card" style="margin-bottom:24px">
+        <div class="db-table-scroll">
+            <table class="db-data-table">
+                <thead>
+                    <tr>
+                        <th style="width:60px">순위</th>
+                        <th style="width:150px">산업분야</th>
+                        <th>주요 위협 특징</th>
+                    </tr>
+                </thead>
+                <tbody id="db-c-table-industry-domestic"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <h3 class="db-sub-title"><i class="fas fa-globe"></i> 주요 국가별 상세 지표 (2024-2026)</h3>
+    <div class="db-chart-card">
+        <div class="db-table-scroll">
+            <table class="db-data-table">
+                <thead>
+                    <tr>
+                        <th>국가</th>
+                        <th>티어</th>
+                        <th>보안시장($B)</th>
+                        <th>국가 사이버 전략 및 보고서</th>
+                    </tr>
+                </thead>
+                <tbody id="db-table-countries"></tbody>
+            </table>
+        </div>
+    </div>
+  </div>
+
+  <!-- ===== [글로벌] AI 분야 ===== -->
+  <div id="db-section-global-ai" class="db-section">
+    <div class="db-info-block">
+        <strong>AI 기반 사이버 위협의 부상:</strong> 2025년 기준 글로벌 침해 사고의 약 <strong>16%</strong>가 AI 연계 위협으로 분류되며, 
+        공격 자동화와 AI 시스템 자체를 노리는 표적 공격이 급증하고 있습니다.
+    </div>
+    
+    <div class="db-highlight-grid" id="db-highlights-ai" style="margin-bottom:24px"></div>
+
+    <div class="db-chart-grid two">
+        <div class="db-chart-card">
+            <div class="db-chart-title">AI 보안 시장 성장 전망 (2024–2030)</div>
+            <div class="db-chart-subtitle">단위: $B (Billion) · CAGR 26.6%</div>
+            <div class="db-chart-wrap tall"><canvas id="db-c-ai-market-growth"></canvas></div>
+        </div>
+        <div class="db-chart-card">
+            <div class="db-chart-title">AI 악용 공격 성공률 및 위협 지표</div>
+            <div class="db-chart-subtitle">음성사기(77%), 피싱증가(1,265%) 등 주요 지표</div>
+            <div class="db-chart-wrap tall"><canvas id="db-c-ai-success-rates"></canvas></div>
+        </div>
+    </div>
+
+    <h3 class="db-sub-title"><i class="fas fa-chart-line"></i> AI 위협 주요 지표 3개년 추이 (2023–2025)</h3>
+    <div class="db-chart-card" style="margin-bottom:24px">
+        <div class="db-chart-title">AI 관련 공격 건수 및 전체 비중 변화</div>
+        <div class="db-chart-subtitle">전 세계 추정치 기준</div>
+        <div class="db-chart-wrap" style="height:350px"><canvas id="db-c-ai-attack-trends"></canvas></div>
+    </div>
+
+    <h3 class="db-sub-title"><i class="fas fa-building"></i> 산업별 AI 리스크 및 대응 인사이트</h3>
+    <div class="db-chart-card">
+        <div class="db-table-scroll">
+            <table class="db-data-table">
+                <thead>
+                    <tr>
+                        <th style="width:120px">산업분야</th>
+                        <th style="width:250px">주요 AI 위협 및 특징</th>
+                        <th>상세 데이터 및 인용 지표</th>
+                    </tr>
+                </thead>
+                <tbody id="db-c-table-ai-industry"></tbody>
+            </table>
+        </div>
+    </div>
+  </div>
+
+  <div id="db-section-global-insights" class="db-section">
+    <h3 class="db-sub-title"><i class="fas fa-bolt"></i> 사이버보안 10대 핵심 지표 (2025-2026)</h3>
+    <div id="db-insights-grid" class="db-insight-grid"></div>
+  </div>
+
+</div>

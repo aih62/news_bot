@@ -335,6 +335,15 @@ def upload_to_drive(file_path):
         today_str = datetime.now().strftime('%Y-%m-%d')
         daily_folder_id = get_or_create_drive_folder(service, today_str, parent_id=main_folder_id)
 
+        # 폴더 권한 '링크가 있는 모든 사용자 보기 가능'으로 설정
+        try:
+            service.permissions().create(
+                fileId=daily_folder_id,
+                body={'type': 'anyone', 'role': 'reader'}
+            ).execute()
+        except:
+            pass
+
         # 3. 하위 폴더에 파일 업로드
         file_metadata = {
             'name': os.path.basename(file_path),
@@ -352,6 +361,49 @@ def upload_to_drive(file_path):
         print(f"Google Drive API 에러 발생: {error}")
         return None
 
+def update_wordpress_briefing_page(links):
+    """생성된 슬라이드와 오디오 링크를 워드프레스 '브리핑' 페이지에 업데이트합니다."""
+    print("워드프레스 '브리핑' 페이지(ID: 4440) 업데이트 중...")
+    from requests.auth import HTTPBasicAuth
+    
+    WP_USERNAME = os.getenv("WP_USERNAME", "inhoe.an@gmail.com")
+    WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
+    if not WP_APP_PASSWORD:
+        WP_APP_PASSWORD = 'ISPe NJZf FCSb Qwh3 MPf2 ZPds'
+    
+    page_id = 4440
+    endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/pages/{page_id}"
+    auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
+    
+    try:
+        # 기존 내용 가져오기
+        res = requests.get(endpoint, auth=auth, timeout=20, verify=False)
+        if res.status_code == 200:
+            current_content = res.json().get('content', {}).get('rendered', '')
+            
+            # 새로 추가할 HTML 구성
+            today_str = datetime.now().strftime('%Y년 %m월 %d일')
+            new_html = f"<h3>{today_str} 글로벌 보안 브리핑</h3>\n<ul>\n"
+            if 'audio' in links:
+                new_html += f'  <li><a href="{links["audio"]}" target="_blank">🎙️ 오늘의 브리핑 오디오 듣기 (Google Drive)</a></li>\n'
+            if 'slides' in links:
+                new_html += f'  <li><a href="{links["slides"]}" target="_blank">📊 오늘의 브리핑 슬라이드 보기 (Google Drive)</a></li>\n'
+            new_html += "</ul>\n<hr/>\n\n"
+            
+            # 기존 내용 위에 새 내용 추가
+            updated_content = new_html + current_content
+            
+            # 업데이트 요청
+            update_res = requests.post(endpoint, auth=auth, json={'content': updated_content}, timeout=30, verify=False)
+            if update_res.status_code == 200:
+                print(f"-> 브리핑 페이지 업데이트 성공!")
+            else:
+                print(f"-> 브리핑 페이지 업데이트 실패: {update_res.status_code} - {update_res.text}")
+        else:
+            print(f"-> 브리핑 페이지 가져오기 실패 (상태: {res.status_code})")
+    except Exception as e:
+        print(f"-> 워드프레스 브리핑 페이지 업데이트 중 오류: {e}")
+
 async def main():
     # 1. 워드프레스에서 오늘자 뉴스 내용 추출 (본문 텍스트 포함)
     posts_data = get_today_posts_content()
@@ -366,13 +418,22 @@ async def main():
     
     if generated_files:
         print(f"\n총 {len(generated_files)}개의 파일이 생성되었습니다.")
+        uploaded_links = {}
         for fpath in generated_files:
             if os.path.exists(fpath):
                 # 3. Google Drive 업로드
                 drive_link = upload_to_drive(fpath)
                 if drive_link:
                     print(f"-> {os.path.basename(fpath)} 업로드 완료: {drive_link}")
+                    if fpath.endswith('.wav'):
+                        uploaded_links['audio'] = drive_link
+                    elif fpath.startswith('slides_'):
+                        uploaded_links['slides'] = drive_link
         
+        # 4. 워드프레스 브리핑 페이지 자동 업데이트
+        if uploaded_links:
+            update_wordpress_briefing_page(uploaded_links)
+            
         print("\n모든 작업이 성공적으로 완료되었습니다!")
     else:
         print("파일 생성에 실패했습니다.")

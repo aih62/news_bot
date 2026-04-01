@@ -175,7 +175,7 @@ async def generate_notebooklm_podcast(posts_data):
             timestamp_file = datetime.now().strftime('%Y%m%d_%H%M')
             podcast_filename = f"podcast_{timestamp_file}.wav"
             report_filename = f"report_{timestamp_file}.txt"
-            slides_filename = f"slides_{timestamp_file}.txt"
+            slides_filename = f"slides_{timestamp_file}.pdf"
             files_downloaded = []
 
             print("아티팩트 생성 완료 대기 및 다운로드 시도...", flush=True)
@@ -187,38 +187,32 @@ async def generate_notebooklm_podcast(posts_data):
                     break
                 
                 try:
-                    all_artifacts = await client.artifacts.list(notebook.id)
-                    
-                    for art in all_artifacts:
-                        # 오디오 다운로드
-                        if art.kind == ArtifactType.AUDIO and art.url and podcast_filename not in files_downloaded:
-                            print(f"오디오 발견! 다운로드 중...", flush=True)
-                            res = requests.get(art.url)
-                            if res.status_code == 200:
-                                with open(podcast_filename, 'wb') as f:
-                                    f.write(res.content)
-                                files_downloaded.append(podcast_filename)
-                        
-                        # 리포트/브리핑 문서 저장
-                        if art.kind == ArtifactType.REPORT and report_filename not in files_downloaded:
-                            content = getattr(art, 'content', None)
-                            if not content and art.url:
-                                try: content = requests.get(art.url).text
-                                except: pass
-                            
-                            if content:
-                                print(f"리포트({art.title}) 발견! 저장 중...", flush=True)
-                                with open(report_filename, 'w', encoding='utf-8') as f:
-                                    f.write(content)
-                                files_downloaded.append(report_filename)
+                    # 오디오 다운로드
+                    if audio_job is not None and podcast_filename not in files_downloaded:
+                        try:
+                            await client.artifacts.download_audio(notebook.id, podcast_filename)
+                            print("오디오 다운로드 완료!", flush=True)
+                            files_downloaded.append(podcast_filename)
+                        except Exception as e:
+                            pass  # Not ready yet
 
-                        # 슬라이드 덱 저장
-                        if art.kind == ArtifactType.SLIDE_DECK and slides_filename not in files_downloaded:
-                            print(f"슬라이드 덱 발견! 저장 중...", flush=True)
-                            content = getattr(art, 'content', str(getattr(art, 'metadata', '')))
-                            with open(slides_filename, 'w', encoding='utf-8') as f:
-                                f.write(content)
+                    # 리포트 다운로드
+                    if report_job is not None and report_filename not in files_downloaded:
+                        try:
+                            await client.artifacts.download_report(notebook.id, report_filename)
+                            print("리포트 다운로드 완료!", flush=True)
+                            files_downloaded.append(report_filename)
+                        except Exception as e:
+                            pass
+
+                    # 슬라이드 파일 다운로드
+                    if slides_job is not None and slides_filename not in files_downloaded:
+                        try:
+                            await client.artifacts.download_slide_deck(notebook.id, slides_filename, output_format="pdf")
+                            print("슬라이드 덱 다운로드 완료!", flush=True)
                             files_downloaded.append(slides_filename)
+                        except Exception as e:
+                            pass
 
                     # 상태 확인 (이미 다운로드된 파일들 기준)
                     audio_done = (podcast_filename in files_downloaded) or (audio_job is None)
@@ -229,20 +223,6 @@ async def generate_notebooklm_podcast(posts_data):
                         if files_downloaded:
                             print(f"아티팩트 다운로드 완료: {files_downloaded}", flush=True)
                             break
-
-                    # 중간에 오디오가 여전히 실패 상태면 1회 재시도 (인덱싱 후 시간이 더 필요할 수 있음)
-                    if not audio_done and audio_job is None and elapsed > 300:
-                         print("오디오 생성을 재시도합니다 (한국어)...", flush=True)
-                         try:
-                             audio_job = await client.artifacts.generate_audio(
-                                 notebook.id,
-                                 language="ko",
-                                 instructions="한국어로 대화해 주세요."
-                             )
-                             if audio_job:
-                                 print(f"오디오 재시도 작업 시작됨 (Task ID: {audio_job.task_id})", flush=True)
-                         except:
-                             pass
 
                     print(f"[{int(elapsed)}초 경과] 대기 중... (Audio: {'O' if podcast_filename in files_downloaded else 'X'}, Report: {'O' if report_filename in files_downloaded else 'X'}, Slides: {'O' if slides_filename in files_downloaded else 'X'})", flush=True)
                     await asyncio.sleep(60)
@@ -268,9 +248,15 @@ def authenticate_drive():
         creds = Credentials.from_authorized_user_file('token.json', SCOPES)
     
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+        try:
+            if creds and creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+            else:
+                raise Exception("토큰 갱신 불가")
+        except Exception:
+            # Refresh 한도 초과 혹은 invalid_grant 발생 시 토큰 삭제 후 재로그인 유도
+            if os.path.exists('token.json'):
+                os.remove('token.json')
             flow = InstalledAppFlow.from_client_secrets_file('credentials.json', SCOPES)
             creds = flow.run_local_server(port=0)
         
@@ -349,7 +335,8 @@ def upload_to_drive(file_path):
             'name': os.path.basename(file_path),
             'parents': [daily_folder_id]
         }
-        mimetype = 'audio/wav' if file_path.endswith('.wav') else 'text/plain'
+        mimetype = 'audio/wav' if str(file_path).endswith('.wav') else \
+                   'application/pdf' if str(file_path).endswith('.pdf') else 'text/plain'
         media = MediaFileUpload(file_path, mimetype=mimetype)
         
         file = service.files().create(body=file_metadata, media_body=media,

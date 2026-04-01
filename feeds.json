@@ -37,6 +37,14 @@
       "Cybersecurity Market Forecast", "Cybersecurity M&A", "Cybersecurity Venture Capital",
       "MSSP Trends", "MDR Trends", "Security Service Edge", "SSE",
       "CISO Strategy", "Cyber Risk Quantification", "Board Level Cybersecurity"
+    ],
+    "글로벌_보안_기업_동향": [
+      "Palo Alto Networks Strategy", "CrowdStrike Falcon Platform", "Fortinet Security Fabric",
+      "Check Point Infinity", "Zscaler Zero Trust Exchange", "Microsoft Security Copilot",
+      "Cisco Security Cloud", "Cloudflare Connectivity Cloud", "Okta Identity Cloud",
+      "SentinelOne Singularity", "Broadcom Symantec Enterprise", "IBM Security QRadar",
+      "Trellix XDR", "Trend Micro Vision One", "Sophos Managed Detection and Response",
+      "Cybersecurity Earnings Call", "Security Vendor M&A", "Next-Gen Firewall Trends"
     ]
   }
 }

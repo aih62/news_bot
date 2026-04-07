@@ -7,7 +7,7 @@ import html
 from dotenv import load_dotenv
 
 # .env 파일 로드 (로컬 테스트용)
-load_dotenv()
+load_dotenv(override=True)
 
 # ================= CONFIGURATION =================
 # 환경 변수에서 가져오되, 비어있거나 '/'만 있는 경우 기본값 사용

@@ -44,40 +44,45 @@ def get_today_posts():
     return []
 
 def shorten_url(long_url):
-    """is.gd API를 사용하여 단축 URL을 생성합니다. (API 키 불필요)
-    is.gd 오류 발생 시 tinyurl.com으로 폴백합니다.
+    """URL 단축 서비스를 사용하여 단축 URL을 생성합니다. (API 키 불필요)
+    1. is.gd (기본)
+    2. da.gd (광고 없음, 깔끔한 리다이렉트)
+    3. cleanuri.com (대체제)
     """
     # 1. is.gd 시도
     try:
         url = "https://is.gd/create.php"
         params = {"format": "simple", "url": long_url}
-        res = requests.get(url, params=params, timeout=10)
-        
+        res = requests.get(url, params=params, timeout=5)
         if res.status_code == 200:
             result = res.text.strip()
-            if result.startswith("http"):
+            if result.startswith("http") and "Error" not in result:
                 return result
-            else:
-                print(f"URL 단축 실패 (is.gd 응답 오류): {result}")
-        else:
-            print(f"URL 단축 실패 (is.gd 상태 코드): {res.status_code}")
-    except Exception as e:
-        print(f"URL 단축 오류 (is.gd): {e}")
+    except Exception:
+        pass
 
-    # 2. tinyurl.com 폴백
+    # 2. da.gd 시도 (광고가 없고 리다이렉트가 빠름)
     try:
-        url = "https://tinyurl.com/api-create.php"
+        url = "https://da.gd/shorten"
         params = {"url": long_url}
-        res = requests.get(url, params=params, timeout=10)
-        
+        res = requests.get(url, params=params, timeout=5)
         if res.status_code == 200:
             result = res.text.strip()
             if result.startswith("http"):
                 return result
-        else:
-            print(f"URL 단축 실패 (tinyurl 상태 코드): {res.status_code}")
-    except Exception as e:
-        print(f"URL 단축 오류 (tinyurl): {e}")
+    except Exception:
+        pass
+
+    # 3. cleanuri.com 시도
+    try:
+        url = "https://cleanuri.com/api/v1/shorten"
+        res = requests.post(url, data={"url": long_url}, timeout=5)
+        if res.status_code == 200:
+            result = res.json().get("result_url")
+            if result:
+                return result
+    except Exception:
+        pass
 
     return long_url
 

@@ -270,20 +270,37 @@ def analyze_news_with_perplexity(news_list, recent_titles):
         response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=300)
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
-            # JSON 리스트 형태를 보다 정확하게 추출 (Markdown 코드 블록 기호 제거 등)
-            json_match = re.search(r'\[\s*\{.*\}\s*\]', content, re.DOTALL)
-            if json_match:
+            
+            # JSON 리스트 형태 추출 시도 (Markdown 코드 블록 기호 제거 및 유연한 추출)
+            json_str = content.strip()
+            if "```json" in json_str:
+                json_str = json_str.split("```json")[1].split("```")[0].strip()
+            elif "```" in json_str:
+                json_str = json_str.split("```")[1].split("```")[0].strip()
+            
+            # 리스트 대괄호 [ ] 사이의 내용만 추출
+            start_idx = json_str.find('[')
+            end_idx = json_str.rfind(']')
+            if start_idx != -1 and end_idx != -1:
+                json_str = json_str[start_idx:end_idx+1]
+
+            try:
+                return json.loads(json_str)
+            except json.JSONDecodeError as je:
+                print(f"JSON 기본 파싱 실패 ({je}), 정제 후 재시도 중...")
+                # 제어 문자 제거 및 비표준 이스케이프 수정 시도
+                cleaned_json = re.sub(r'[\x00-\x1F\x7F]', '', json_str)
+                # 간혹 발생하는 이스케이프되지 않은 큰따옴표 문제 등은 완벽히 해결하기 어려우나 기본 시도
                 try:
-                    return json.loads(json_match.group())
-                except json.JSONDecodeError:
-                    # JSON 내부의 줄바꿈이나 이스케이프 문자 문제 해결 시도
-                    cleaned_json = re.sub(r'[\x00-\x1F\x7F]', '', json_match.group())
                     return json.loads(cleaned_json)
-            else:
-                try:
-                    return json.loads(content)
-                except:
-                    print(f"JSON 파싱 실패: {content[:200]}...")
+                except Exception as e2:
+                    print(f"최종 파싱 실패. 응답 길이: {len(content)}")
+                    with open("debug_perplexity_error.txt", "w", encoding="utf-8") as df:
+                        df.write(content)
+                    print(f"디버그 정보가 debug_perplexity_error.txt에 저장되었습니다.")
+                    raise e2
+        else:
+            print(f"API 호출 실패 (Status: {response.status_code}): {response.text}")
     except Exception as e:
         print(f"AI 분석 중 예외 발생: {e}")
     return []

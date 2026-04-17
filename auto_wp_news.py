@@ -121,11 +121,14 @@ def get_rss_news():
         try:
             feed = feedparser.parse(rss_url)
             for entry in feed.entries[:20]:
-                # 24시간 이내 기사인지 엄격 확인
                 is_recent = False
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
                     if now - calendar.timegm(entry.published_parsed) < day_in_seconds:
                         is_recent = True
+                
+                # 직접 피드에서도 한국어 포함 기사 엄격 제외
+                if is_recent and re.search('[가-힣]', entry.title):
+                    is_recent = False
                 
                 if is_recent and entry.link not in seen_links:
                     all_entries.append({
@@ -138,11 +141,12 @@ def get_rss_news():
                     seen_links.add(entry.link)
         except: pass
 
-    # 구글 뉴스 검색: 글로벌(US/English) 설정으로 변경 및 최신성(when:1d) 강제
+    # 구글 뉴스 검색: 글로벌 설정 강화 및 한국 관련 키워드 배제
     for category_name, keywords in search_categories.items():
-        # 글로벌 뉴스 수집을 위해 hl=en-US, gl=US, ceid=US:en 사용
+        # -site:co.kr 등을 추가하여 한국 도메인 기사 배제 시도
         query = " OR ".join([f'"{k}"' if " " in k else k for k in keywords])
-        rss_url = f"https://news.google.com/rss/search?q={quote(query)}+when:1d&hl=en-US&gl=US&ceid=US:en"
+        full_query = f"({query}) -site:co.kr -site:kr when:1d"
+        rss_url = f"https://news.google.com/rss/search?q={quote(full_query)}&hl=en-US&gl=US&ceid=US:en"
         try:
             feed = feedparser.parse(rss_url)
             for entry in feed.entries[:15]:

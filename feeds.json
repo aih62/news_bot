@@ -13,7 +13,9 @@
       "AI Security", "LLM Security", "Prompt Injection", "AI Jailbreak",
       "Adversarial Machine Learning", "Model Poisoning", "OWASP Top 10 for LLM",
       "NIST AI RMF", "AI Red Teaming", "Deepfake Security", "Agentic AI Security",
-      "AI Governance", "Generative AI Risk"
+      "AI Governance", "Generative AI Risk",
+      "Claude Mythos", "GPT-5.4-cyber", "Cybersecurity specialized AI",
+      "Security-specific LLM", "Cyber LLM", "AI for Offensive Security", "AI for Defensive Security"
     ],
     "글로벌_규제_및_공급망": [
       "EU AI Act", "CRA", "EU Cyber Resilience Act", "NIS2", "DORA",
@@ -45,6 +47,12 @@
       "SentinelOne Singularity", "Broadcom Symantec Enterprise", "IBM Security QRadar",
       "Trellix XDR", "Trend Micro Vision One", "Sophos Managed Detection and Response",
       "Cybersecurity Earnings Call", "Security Vendor M&A", "Next-Gen Firewall Trends"
+    ],
+    "주요_AI_기업_보안_동향": [
+      "OpenAI Security", "OpenAI Red Teaming", "ChatGPT Security", "OpenAI Safety",
+      "Anthropic Security", "Claude Security", "Anthropic Constitutional AI",
+      "Microsoft AI Security", "Microsoft Copilot Security", "Azure AI Security",
+      "Google Gemini Security", "Google AI Security", "DeepMind Security", "Google SAIF"
     ]
   }
 }

@@ -120,13 +120,12 @@ def get_rss_news():
     for source_name, rss_url in direct_feeds.items():
         try:
             feed = feedparser.parse(rss_url)
-            for entry in feed.entries[:15]:
-                # 24시간 이내 기사인지 확인
-                is_recent = True
+            for entry in feed.entries[:20]:
+                # 24시간 이내 기사인지 엄격 확인
+                is_recent = False
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    entry_time = calendar.timegm(entry.published_parsed)
-                    if now - entry_time > day_in_seconds:
-                        is_recent = False
+                    if now - calendar.timegm(entry.published_parsed) < day_in_seconds:
+                        is_recent = True
                 
                 if is_recent and entry.link not in seen_links:
                     all_entries.append({
@@ -139,9 +138,11 @@ def get_rss_news():
                     seen_links.add(entry.link)
         except: pass
 
+    # 구글 뉴스 검색: 글로벌(US/English) 설정으로 변경 및 최신성(when:1d) 강제
     for category_name, keywords in search_categories.items():
+        # 글로벌 뉴스 수집을 위해 hl=en-US, gl=US, ceid=US:en 사용
         query = " OR ".join([f'"{k}"' if " " in k else k for k in keywords])
-        rss_url = f"https://news.google.com/rss/search?q={quote(query)}&hl=ko&gl=KR&ceid=KR:ko"
+        rss_url = f"https://news.google.com/rss/search?q={quote(query)}+when:1d&hl=en-US&gl=US&ceid=US:en"
         try:
             feed = feedparser.parse(rss_url)
             for entry in feed.entries[:15]:
@@ -151,6 +152,10 @@ def get_rss_news():
                     entry_time = calendar.timegm(entry.published_parsed)
                     if now - entry_time > day_in_seconds:
                         is_recent = False
+                
+                # 한국어 포함 여부 체크 (국내 뉴스 제외 원칙)
+                if is_recent and re.search('[가-힣]', entry.title):
+                    is_recent = False
 
                 if is_recent and entry.link not in seen_links:
                     all_entries.append({
@@ -163,8 +168,21 @@ def get_rss_news():
                     seen_links.add(entry.link)
         except: pass
             
-    print(f"총 {len(all_entries)}개의 최근(24시간 이내) 기사 수집 완료.")
-    return all_entries
+    # 균형 잡힌 뉴스 선정 (AI 3.5 : 일반 6.5 비율 타겟)
+    ai_categories = ["주요_AI_기업_보안_동향", "AI_및_신기술_보안"]
+    
+    ai_pool = [n for n in all_entries if n['search_category'] in ai_categories]
+    expert_pool = [n for n in all_entries if "Expert_" in n['search_category']]
+    other_pool = [n for n in all_entries if n['search_category'] not in ai_categories and "Expert_" not in n['search_category']]
+    
+    # 최종 리스트 구성 (Perplexity 분석용으로 충분히 전달하되 순서를 섞음)
+    # AI 뉴스 12개 + 전문가/일반 뉴스 28개 = 총 40개 전달 (이 중 10개를 AI가 최종 선정)
+    balanced_news = ai_pool[:12] + expert_pool[:20] + other_pool[:8]
+    
+    print(f"총 {len(all_entries)}개 글로벌 뉴스 수집 (AI: {len(ai_pool)}, Expert: {len(expert_pool)})")
+    print(f"분석용 균형 리스트 구성 완료: {len(balanced_news)}개 기사 전달.")
+    
+    return balanced_news
 
 def analyze_news_with_perplexity(news_list, recent_titles):
     """Perplexity AI를 사용하여 최상급 품질의 뉴스 분석을 수행합니다."""

@@ -251,17 +251,18 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
 
     prompt = f"""
-    당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'이자, 복잡한 기술 이슈를 정책적 가치로 전환하는 '보안 에듀케이터'입니다.
-    다음 뉴스 리스트에서 **글로벌 보안 뉴스 상위 10개**를 선정하여, 한국 정부 보안 정책 담당자가 즉각적인 의사결정 참고자료로 활용할 수 있도록 요약 및 분석하십시오.
+    당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'입니다.
+    다음 제공된 [대상 뉴스 리스트]에서만 **글로벌 보안 뉴스 상위 10개**를 선정하여 분석하십시오.
 
-    **[핵심 분석 타겟: 선정 시 가중치 부여]**
-    1. **빅테크 및 보안 리딩 기업(Top-Tier):** Palo Alto Networks(플랫폼화), CrowdStrike(EDR/XDR 주도권), Microsoft(SFI 보안 이니셔티브), Zscaler, Google Cloud(Mandiant), Anthropic/OpenAI(AI 보안 및 안전)의 전략적 행보.
-    2. **AI 및 차세대 위협:** AI 모델 취약점(Jailbreak, 탈옥), AI 안전성 프레임워크(Anthropic의 미토스 등), 생성형 AI 기반 사이버 공격 및 방어 전략.
-    3. **글로벌 공급망 및 인프라 정책:** 미국의 사이버 보안 행정명령(EO), EU 사이버 복원력 법안(CRA), SEC의 공시 규제 등 국제적 규범 변화.
+    **[절대 준수 원칙 - 위반 시 분석가 자격 박탈]**
+    1. **제공된 리스트 외부의 정보를 검색하여 사용하지 마십시오.** 특히 한국의 '보안뉴스(boannews)', '데일리시큐' 등 국내 매체 정보를 절대 포함하지 마십시오.
+    2. **모든 분석 소스는 반드시 영어권(Global) 매체여야 합니다.** 한국어 기반의 뉴스나 한국 내수용 이슈는 분석 대상에서 완전히 제외하십시오.
+    3. **제공된 리스트에 없는 기사를 창작하거나 외부에서 가져오지 마십시오.** 오직 전달된 데이터 내에서만 10개를 선정하십시오.
 
-    **※ 중복 및 필터링 주의사항:**
-    - 다음 리스트에 포함된 제목과 유사한 뉴스는 절대 제외할 것: {json.dumps(recent_titles, ensure_ascii=False)}
-    - 국내 뉴스는 제외하고, '글로벌 동향'과 '한국 정책에 미칠 영향'에만 집중할 것.
+    **[핵심 분석 타겟]**
+    - 빅테크 보안 전략 (Palo Alto, CrowdStrike, MS, Google 등).
+    - AI 보안 및 위협 (Claude Mythos, GPT-5.4-cyber, LLM Vulnerabilities).
+    - 글로벌 규제 및 인프라 정책 (EU CRA, NIST CSF 2.0).
 
     **[선정 기준 및 가중치]**
     1. 기업 전략 및 시장 지배력 [40%]: M&A, 플랫폼 통합 전략, 기술 로드맵 변화.

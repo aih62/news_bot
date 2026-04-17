@@ -172,21 +172,75 @@ def get_rss_news():
                     seen_links.add(entry.link)
         except: pass
             
-    # 균형 잡힌 뉴스 선정 (AI 3.5 : 일반 6.5 비율 타겟)
-    ai_categories = ["주요_AI_기업_보안_동향", "AI_및_신기술_보안"]
-    
-    ai_pool = [n for n in all_entries if n['search_category'] in ai_categories]
-    expert_pool = [n for n in all_entries if "Expert_" in n['search_category']]
-    other_pool = [n for n in all_entries if n['search_category'] not in ai_categories and "Expert_" not in n['search_category']]
-    
-    # 최종 리스트 구성 (Perplexity 분석용으로 충분히 전달하되 순서를 섞음)
-    # AI 뉴스 12개 + 전문가/일반 뉴스 28개 = 총 40개 전달 (이 중 10개를 AI가 최종 선정)
-    balanced_news = ai_pool[:12] + expert_pool[:20] + other_pool[:8]
-    
-    print(f"총 {len(all_entries)}개 글로벌 뉴스 수집 (AI: {len(ai_pool)}, Expert: {len(expert_pool)})")
-    print(f"분석용 균형 리스트 구성 완료: {len(balanced_news)}개 기사 전달.")
-    
-    return balanced_news
+    # --- 가치 평가 기반 뉴스 선정 로직 (Scoring System) ---
+    def calculate_score(entry):
+        score = 0
+        title = entry['title'].lower()
+        
+        # 1. 산업 영향도 및 키워드 가중치
+        impact_keywords = {
+            'critical': 10, 'zero-day': 15, 'vulnerability': 5, 'exploit': 5, 
+            'breach': 8, 'cyberattack': 7, 'ransomware': 7, 'supply chain': 10,
+            'openai': 12, 'anthropic': 12, 'microsoft': 8, 'google': 8, 'nvidia': 8,
+            'regulation': 10, 'policy': 10, 'standard': 8, 'nist': 10, 'cisa': 10
+        }
+        for kw, points in impact_keywords.items():
+            if kw in title:
+                score += points
+        
+        # 2. 시의성 가중치 (최신일수록 높은 점수)
+        try:
+            pub_time = calendar.timegm(time.strptime(entry['published'], time.ctime())) if isinstance(entry['published'], str) else entry['published']
+            hours_ago = (now - pub_time) / 3600
+            if hours_ago < 6: score += 10
+            elif hours_ago < 12: score += 5
+        except: pass
+
+        if "Expert_" in entry['search_category']:
+            score += 5
+            
+        return score
+
+    # 모든 기사에 대해 점수 계산
+    for entry in all_entries:
+        entry['score'] = calculate_score(entry)
+
+    # 점수 순으로 정렬
+    all_entries.sort(key=lambda x: x['score'], reverse=True)
+
+    # 중복 기사 및 매체 쿼터 관리
+    final_candidates = []
+    source_counts = {}
+    seen_keywords = [] # 중복 기사 방지용
+
+    def is_duplicate(new_title):
+        # 제목의 주요 명사구/단어 3개 이상이 겹치면 중복으로 간주 (간이 로직)
+        words = set(re.findall(r'\w{4,}', new_title.lower())) # 4글자 이상 단어만 추출
+        for existing_words in seen_keywords:
+            if len(words.intersection(existing_words)) >= 3:
+                return True
+        return False
+
+    for entry in all_entries:
+        source = entry['search_category']
+        
+        # 매체별 최대 5개로 완화 (안정적인 10개 확보를 위함)
+        if source_counts.get(source, 0) >= 5:
+            continue
+            
+        # 중복 기사(내용이 겹치는 다른 매체 기사) 제외
+        if is_duplicate(entry['title']):
+            continue
+        
+        final_candidates.append(entry)
+        source_counts[source] = source_counts.get(source, 0) + 1
+        seen_keywords.append(set(re.findall(r'\w{4,}', entry['title'].lower())))
+        
+        if len(final_candidates) >= 40:
+            break
+
+    print(f"총 {len(all_entries)}개 수집 -> 중복 제거 및 가치 평가 후 {len(final_candidates)}개 후보 선정.")
+    return final_candidates
 
 def analyze_news_with_perplexity(news_list, recent_titles):
     """Perplexity AI를 사용하여 최상급 품질의 뉴스 분석을 수행합니다."""

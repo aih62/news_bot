@@ -111,11 +111,23 @@ def get_rss_news():
     day_in_seconds = 24 * 60 * 60
 
     def extract_image(entry):
+        # 1. 미디어 태그 탐색
         if 'media_content' in entry and entry.media_content: return entry.media_content[0]['url']
         if 'media_thumbnail' in entry and entry.media_thumbnail: return entry.media_thumbnail[0]['url']
+        
+        # 2. 본문(summary, description, content)에서 이미지 태그 탐색
         content = getattr(entry, 'summary', '') + getattr(entry, 'description', '')
+        if 'content' in entry:
+            for c in entry.content:
+                content += c.value
+        
         img_match = re.search(r'<img [^>]*src="([^"]+)"', content)
-        return img_match.group(1) if img_match else None
+        if img_match:
+            img_url = img_match.group(1)
+            # 1x1 픽셀 추적 이미지 등 무시
+            if "feedburner.com" in img_url and "/~" in img_url: return None
+            return img_url
+        return None
 
     for source_name, rss_url in direct_feeds.items():
         try:
@@ -130,15 +142,18 @@ def get_rss_news():
                 if is_recent and re.search('[가-힣]', entry.title):
                     is_recent = False
                 
-                if is_recent and entry.link not in seen_links:
+                # FeedBurner 원본 링크가 있으면 그것을 사용 (매칭 정확도 향상)
+                actual_link = getattr(entry, 'feedburner_origlink', entry.link)
+                
+                if is_recent and actual_link not in seen_links:
                     all_entries.append({
                         "title": entry.title,
-                        "link": entry.link,
+                        "link": actual_link,
                         "published": getattr(entry, 'published', time.ctime()),
                         "search_category": f"Expert_{source_name}",
                         "rss_image": extract_image(entry)
                     })
-                    seen_links.add(entry.link)
+                    seen_links.add(actual_link)
         except: pass
 
     # 구글 뉴스 검색: 글로벌 설정 강화 및 한국 관련 키워드 배제

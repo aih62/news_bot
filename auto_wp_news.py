@@ -187,31 +187,32 @@ def get_rss_news():
                     seen_links.add(entry.link)
         except: pass
             
-    # --- 가치 평가 기반 뉴스 선정 로직 (Strategic/Policy Focus) ---
+    # --- 가치 평가 기반 뉴스 선정 로직 (Strategic/Policy Focus - Enhanced) ---
     def calculate_score(entry):
         score = 0
         title = entry['title'].lower()
         
-        # 1. 전략 및 정책 영향도 가중치 (High Priority)
+        # 1. 전략 및 정책 영향도 가중치 (Overwhelming Priority)
         strategic_keywords = {
-            'strategy': 15, 'policy': 15, 'regulation': 15, 'strategic': 12,
-            'investment': 10, 'm&a': 12, 'acquisition': 10, 'merger': 10,
-            'standard': 10, 'framework': 10, 'nist': 12, 'sec': 12, 'cisa': 12,
-            'government': 8, 'national': 10, 'global': 8, 'market': 8,
-            'ai safety': 15, 'ai governance': 15, 'quantum-safe': 12
+            'strategy': 40, 'policy': 40, 'regulation': 40, 'strategic': 35,
+            'investment': 30, 'm&a': 35, 'acquisition': 30, 'merger': 30,
+            'standard': 25, 'framework': 25, 'nist': 35, 'sec': 35, 'cisa': 35,
+            'government': 20, 'national': 25, 'global': 20, 'market': 20,
+            'ai safety': 40, 'ai governance': 40, 'quantum-safe': 35,
+            'compliance': 25, 'directive': 25, 'legislation': 30
         }
         
-        # 2. 산업 리더 및 빅테크 가중치 (Medium-High Priority)
+        # 2. 산업 리더 및 빅테크 가중치 (High Priority)
         tech_leaders = {
-            'microsoft': 8, 'google': 8, 'apple': 8, 'palo alto': 8, 
-            'crowdstrike': 8, 'openai': 10, 'anthropic': 10, 'nvidia': 10,
-            'cisco': 6, 'amazon': 6, 'aws': 6, 'meta': 6
+            'microsoft': 15, 'google': 15, 'apple': 15, 'palo alto': 15, 
+            'crowdstrike': 15, 'openai': 20, 'anthropic': 20, 'nvidia': 20,
+            'cisco': 10, 'amazon': 10, 'aws': 10, 'meta': 10
         }
         
-        # 3. 기술적 세부 사항 가중치 (Lower Priority)
+        # 3. 기술적 세부 사항 가중치 (Negligible Priority)
         technical_keywords = {
-            'vulnerability': 3, 'exploit': 3, 'malware': 3, 'ransomware': 3,
-            'breach': 4, 'cyberattack': 4, 'zero-day': 5, 'cve': 2
+            'vulnerability': 2, 'exploit': 2, 'malware': 2, 'ransomware': 2,
+            'breach': 3, 'cyberattack': 3, 'zero-day': 4, 'cve': 1
         }
 
         for kw, points in strategic_keywords.items():
@@ -221,13 +222,8 @@ def get_rss_news():
         for kw, points in technical_keywords.items():
             if kw in title: score += points
         
-        # 4. 시의성 가중치 (최신일수록 높은 점수)
-        try:
-            pub_time = calendar.timegm(time.strptime(entry['published'], time.ctime())) if isinstance(entry['published'], str) else entry['published']
-            hours_ago = (now - pub_time) / 3600
-            if hours_ago < 6: score += 10
-            elif hours_ago < 12: score += 5
-        except: pass
+        # 24시간 이내 기사라면 동일한 시의성 점수 부여 (중복 제거용)
+        score += 10 # 24h freshness base score
 
         if "Expert_" in entry['search_category']:
             score += 5

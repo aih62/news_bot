@@ -187,23 +187,41 @@ def get_rss_news():
                     seen_links.add(entry.link)
         except: pass
             
-    # --- 가치 평가 기반 뉴스 선정 로직 (Scoring System) ---
+    # --- 가치 평가 기반 뉴스 선정 로직 (Strategic/Policy Focus) ---
     def calculate_score(entry):
         score = 0
         title = entry['title'].lower()
         
-        # 1. 산업 영향도 및 키워드 가중치
-        impact_keywords = {
-            'critical': 10, 'zero-day': 15, 'vulnerability': 5, 'exploit': 5, 
-            'breach': 8, 'cyberattack': 7, 'ransomware': 7, 'supply chain': 10,
-            'openai': 12, 'anthropic': 12, 'microsoft': 8, 'google': 8, 'nvidia': 8,
-            'regulation': 10, 'policy': 10, 'standard': 8, 'nist': 10, 'cisa': 10
+        # 1. 전략 및 정책 영향도 가중치 (High Priority)
+        strategic_keywords = {
+            'strategy': 15, 'policy': 15, 'regulation': 15, 'strategic': 12,
+            'investment': 10, 'm&a': 12, 'acquisition': 10, 'merger': 10,
+            'standard': 10, 'framework': 10, 'nist': 12, 'sec': 12, 'cisa': 12,
+            'government': 8, 'national': 10, 'global': 8, 'market': 8,
+            'ai safety': 15, 'ai governance': 15, 'quantum-safe': 12
         }
-        for kw, points in impact_keywords.items():
-            if kw in title:
-                score += points
         
-        # 2. 시의성 가중치 (최신일수록 높은 점수)
+        # 2. 산업 리더 및 빅테크 가중치 (Medium-High Priority)
+        tech_leaders = {
+            'microsoft': 8, 'google': 8, 'apple': 8, 'palo alto': 8, 
+            'crowdstrike': 8, 'openai': 10, 'anthropic': 10, 'nvidia': 10,
+            'cisco': 6, 'amazon': 6, 'aws': 6, 'meta': 6
+        }
+        
+        # 3. 기술적 세부 사항 가중치 (Lower Priority)
+        technical_keywords = {
+            'vulnerability': 3, 'exploit': 3, 'malware': 3, 'ransomware': 3,
+            'breach': 4, 'cyberattack': 4, 'zero-day': 5, 'cve': 2
+        }
+
+        for kw, points in strategic_keywords.items():
+            if kw in title: score += points
+        for kw, points in tech_leaders.items():
+            if kw in title: score += points
+        for kw, points in technical_keywords.items():
+            if kw in title: score += points
+        
+        # 4. 시의성 가중치 (최신일수록 높은 점수)
         try:
             pub_time = calendar.timegm(time.strptime(entry['published'], time.ctime())) if isinstance(entry['published'], str) else entry['published']
             hours_ago = (now - pub_time) / 3600

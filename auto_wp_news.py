@@ -91,6 +91,48 @@ def get_image_from_webpage(url):
     except: pass
     return None
 
+def calculate_score(entry):
+    score = 0
+    title = entry['title'].lower()
+    
+    # 1. 전략 및 정책 영향도 가중치 (Overwhelming Priority)
+    strategic_keywords = {
+        'strategy': 40, 'policy': 40, 'regulation': 40, 'strategic': 35,
+        'investment': 30, 'm&a': 35, 'acquisition': 30, 'merger': 30,
+        'standard': 25, 'framework': 25, 'nist': 35, 'sec': 35, 'cisa': 35,
+        'government': 20, 'national': 25, 'global': 20, 'market': 20,
+        'ai safety': 40, 'ai governance': 40, 'quantum-safe': 35,
+        'compliance': 25, 'directive': 25, 'legislation': 30
+    }
+    
+    # 2. 산업 리더 및 빅테크 가중치 (High Priority)
+    tech_leaders = {
+        'microsoft': 15, 'google': 15, 'apple': 15, 'palo alto': 15, 
+        'crowdstrike': 15, 'openai': 20, 'anthropic': 20, 'nvidia': 20,
+        'cisco': 10, 'amazon': 10, 'aws': 10, 'meta': 10
+    }
+    
+    # 3. 기술적 세부 사항 가중치 (Negligible Priority)
+    technical_keywords = {
+        'vulnerability': 2, 'exploit': 2, 'malware': 2, 'ransomware': 2,
+        'breach': 3, 'cyberattack': 3, 'zero-day': 4, 'cve': 1
+    }
+
+    for kw, points in strategic_keywords.items():
+        if kw in title: score += points
+    for kw, points in tech_leaders.items():
+        if kw in title: score += points
+    for kw, points in technical_keywords.items():
+        if kw in title: score += points
+    
+    # 24시간 이내 기사라면 동일한 시의성 점수 부여 (중복 제거용)
+    score += 10 # 24h freshness base score
+
+    if "Expert_" in entry['search_category']:
+        score += 5
+        
+    return score
+
 def get_rss_news():
     """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다 (최근 24시간 이내)."""
     print("feeds.json 로드 중...")
@@ -109,6 +151,15 @@ def get_rss_news():
     # 시간 필터링 기준 (현재 시간으로부터 24시간 전)
     now = time.time()
     day_in_seconds = 24 * 60 * 60
+
+    korean_media_blacklist = [
+        "koreaherald.com", "koreatimes.co.kr", "koreatimes.com", "en.yna.co.kr", "yna.co.kr",
+        "koreajoongangdaily.joins.com", "english.chosun.com", "pulsenews.co.kr", "kedglobal.com",
+        "koreaittimes.com", "businesskorea.co.kr", "koreabizwire.com", "donga.com", "hani.co.kr",
+        "kyunghyang.com", "maeil.co.kr", "joins.com", "etnews.com", "zdnet.co.kr", "boannews.com",
+        "dailysecu.com", "ddaily.co.kr", "digitaltoday.co.kr"
+    ]
+    exclude_sites = " ".join([f"-site:{site}" for site in korean_media_blacklist])
 
     def extract_image(entry):
         # 1. 미디어 태그 탐색
@@ -129,6 +180,7 @@ def get_rss_news():
             return img_url
         return None
 
+    # 직접 피드 수집
     for source_name, rss_url in direct_feeds.items():
         try:
             feed = feedparser.parse(rss_url)
@@ -145,6 +197,12 @@ def get_rss_news():
                 # FeedBurner 원본 링크가 있으면 그것을 사용 (매칭 정확도 향상)
                 actual_link = getattr(entry, 'feedburner_origlink', entry.link)
                 
+                # 블랙리스트 도메인 체크
+                if is_recent:
+                    link_lower = actual_link.lower()
+                    if any(site in link_lower for site in korean_media_blacklist):
+                        is_recent = False
+
                 if is_recent and actual_link not in seen_links:
                     all_entries.append({
                         "title": entry.title,
@@ -156,25 +214,26 @@ def get_rss_news():
                     seen_links.add(actual_link)
         except: pass
 
-    # 구글 뉴스 검색: 글로벌 설정 강화 및 한국 관련 키워드 배제
+    # 구글 뉴스 검색
     for category_name, keywords in search_categories.items():
-        # -site:co.kr 등을 추가하여 한국 도메인 기사 배제 시도
         query = " OR ".join([f'"{k}"' if " " in k else k for k in keywords])
-        full_query = f"({query}) -site:co.kr -site:kr when:1d"
+        full_query = f"({query}) -site:co.kr -site:kr {exclude_sites} when:1d"
         rss_url = f"https://news.google.com/rss/search?q={quote(full_query)}&hl=en-US&gl=US&ceid=US:en"
         try:
             feed = feedparser.parse(rss_url)
             for entry in feed.entries[:15]:
-                # 24시간 이내 기사인지 확인
                 is_recent = True
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    entry_time = calendar.timegm(entry.published_parsed)
-                    if now - entry_time > day_in_seconds:
+                    if now - calendar.timegm(entry.published_parsed) > day_in_seconds:
                         is_recent = False
                 
-                # 한국어 포함 여부 체크 (국내 뉴스 제외 원칙)
                 if is_recent and re.search('[가-힣]', entry.title):
                     is_recent = False
+                
+                if is_recent:
+                    link_lower = entry.link.lower()
+                    if any(site in link_lower for site in korean_media_blacklist):
+                        is_recent = False
 
                 if is_recent and entry.link not in seen_links:
                     all_entries.append({
@@ -186,49 +245,6 @@ def get_rss_news():
                     })
                     seen_links.add(entry.link)
         except: pass
-            
-    # --- 가치 평가 기반 뉴스 선정 로직 (Strategic/Policy Focus - Enhanced) ---
-    def calculate_score(entry):
-        score = 0
-        title = entry['title'].lower()
-        
-        # 1. 전략 및 정책 영향도 가중치 (Overwhelming Priority)
-        strategic_keywords = {
-            'strategy': 40, 'policy': 40, 'regulation': 40, 'strategic': 35,
-            'investment': 30, 'm&a': 35, 'acquisition': 30, 'merger': 30,
-            'standard': 25, 'framework': 25, 'nist': 35, 'sec': 35, 'cisa': 35,
-            'government': 20, 'national': 25, 'global': 20, 'market': 20,
-            'ai safety': 40, 'ai governance': 40, 'quantum-safe': 35,
-            'compliance': 25, 'directive': 25, 'legislation': 30
-        }
-        
-        # 2. 산업 리더 및 빅테크 가중치 (High Priority)
-        tech_leaders = {
-            'microsoft': 15, 'google': 15, 'apple': 15, 'palo alto': 15, 
-            'crowdstrike': 15, 'openai': 20, 'anthropic': 20, 'nvidia': 20,
-            'cisco': 10, 'amazon': 10, 'aws': 10, 'meta': 10
-        }
-        
-        # 3. 기술적 세부 사항 가중치 (Negligible Priority)
-        technical_keywords = {
-            'vulnerability': 2, 'exploit': 2, 'malware': 2, 'ransomware': 2,
-            'breach': 3, 'cyberattack': 3, 'zero-day': 4, 'cve': 1
-        }
-
-        for kw, points in strategic_keywords.items():
-            if kw in title: score += points
-        for kw, points in tech_leaders.items():
-            if kw in title: score += points
-        for kw, points in technical_keywords.items():
-            if kw in title: score += points
-        
-        # 24시간 이내 기사라면 동일한 시의성 점수 부여 (중복 제거용)
-        score += 10 # 24h freshness base score
-
-        if "Expert_" in entry['search_category']:
-            score += 5
-            
-        return score
 
     # 모든 기사에 대해 점수 계산
     for entry in all_entries:

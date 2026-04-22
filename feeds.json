@@ -8,7 +8,8 @@
     "Threatpost": "https://threatpost.com/feed/",
     "WiredSecurity": "https://www.wired.com/feed/category/security/latest/rss",
     "Axios": "https://api.axios.com/feed/",
-    "TheDecoder": "https://the-decoder.com/feed/"
+    "TheDecoder": "https://the-decoder.com/feed/",
+    "SCMedia": "https://www.scworld.com/rss/"
   },
   "search_categories": {
     "글로벌_보안_전략_및_트렌드": [

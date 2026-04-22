@@ -6,7 +6,9 @@
     "KrebsOnSecurity": "https://krebsonsecurity.com/feed/",
     "SchneierOnSecurity": "https://www.schneier.com/blog/feed/",
     "Threatpost": "https://threatpost.com/feed/",
-    "WiredSecurity": "https://www.wired.com/feed/category/security/latest/rss"
+    "WiredSecurity": "https://www.wired.com/feed/category/security/latest/rss",
+    "Axios": "https://api.axios.com/feed/",
+    "TheDecoder": "https://the-decoder.com/feed/"
   },
   "search_categories": {
     "글로벌_보안_전략_및_트렌드": [
@@ -22,7 +24,8 @@
     "AI_및_디지털_거버넌스": [
       "AI Security Policy", "AI Safety Framework", "Generative AI Risk Management",
       "Responsible AI", "AI Governance", "NIST AI RMF", "EU AI Act Implementation",
-      "Quantum-Safe Cryptography Strategy"
+      "Quantum-Safe Cryptography Strategy", "Anthropic Mythos", "Project Glasswing",
+      "AI Safety Guidelines", "AI red teaming"
     ],
     "국제_규제_및_표준": [
       "EU Cyber Resilience Act", "SEC Cybersecurity Disclosure", "NIST CSF 2.0",

@@ -102,13 +102,14 @@ def calculate_score(entry):
         'standard': 25, 'framework': 25, 'nist': 35, 'sec': 35, 'cisa': 35,
         'government': 20, 'national': 25, 'global': 20, 'market': 20,
         'ai safety': 40, 'ai governance': 40, 'quantum-safe': 35,
-        'compliance': 25, 'directive': 25, 'legislation': 30
+        'compliance': 25, 'directive': 25, 'legislation': 30,
+        'mythos': 45, 'glasswing': 45, 'red teaming': 35
     }
     
     # 2. 산업 리더 및 빅테크 가중치 (High Priority)
     tech_leaders = {
         'microsoft': 15, 'google': 15, 'apple': 15, 'palo alto': 15, 
-        'crowdstrike': 15, 'openai': 20, 'anthropic': 20, 'nvidia': 20,
+        'crowdstrike': 15, 'openai': 20, 'anthropic': 25, 'nvidia': 20,
         'cisco': 10, 'amazon': 10, 'aws': 10, 'meta': 10
     }
     
@@ -157,7 +158,7 @@ def get_rss_news():
         "koreajoongangdaily.joins.com", "english.chosun.com", "pulsenews.co.kr", "kedglobal.com",
         "koreaittimes.com", "businesskorea.co.kr", "koreabizwire.com", "donga.com", "hani.co.kr",
         "kyunghyang.com", "maeil.co.kr", "joins.com", "etnews.com", "zdnet.co.kr", "boannews.com",
-        "dailysecu.com", "ddaily.co.kr", "digitaltoday.co.kr"
+        "dailysecu.com", "ddaily.co.kr", "digitaltoday.co.kr", "zdnet.com"
     ]
     exclude_sites = " ".join([f"-site:{site}" for site in korean_media_blacklist])
 

@@ -15,18 +15,20 @@
     "글로벌_보안_전략_및_트렌드": [
       "Cybersecurity Strategy", "Cybersecurity Policy", "Cybersecurity Regulation",
       "National Cybersecurity", "Cybersecurity Market", "Cybersecurity Investment",
-      "Cybersecurity M&A", "Cybersecurity Trends 2026", "Security Transformation"
+      "Cybersecurity M&A", "Cybersecurity Trends 2026", "Security Transformation",
+      "National Cybersecurity Strategy 2026", "Agentic AI Security"
     ],
     "빅테크_및_플랫폼_보안": [
       "Microsoft Security Strategy", "Google Cloud Security", "Amazon AWS Security",
       "Palo Alto Networks Platform", "CrowdStrike Falcon", "Big Tech Security Policy",
-      "Enterprise Security Platform", "Security Consolidation"
+      "Enterprise Security Platform", "Security Consolidation", "Autonomous Security Operations"
     ],
     "AI_및_디지털_거버넌스": [
       "AI Security Policy", "AI Safety Framework", "Generative AI Risk Management",
       "Responsible AI", "AI Governance", "NIST AI RMF", "EU AI Act Implementation",
       "Quantum-Safe Cryptography Strategy", "Anthropic Mythos", "Project Glasswing",
-      "AI Safety Guidelines", "AI red teaming"
+      "AI Safety Guidelines", "AI red teaming", "Agentic AI threats", "State-level AI legislation",
+      "AI Safety Bill"
     ],
     "국제_규제_및_표준": [
       "EU Cyber Resilience Act", "SEC Cybersecurity Disclosure", "NIST CSF 2.0",
@@ -35,7 +37,8 @@
     ],
     "공급망_및_국가_안보": [
       "Software Supply Chain Security", "SBOM Policy", "Critical Infrastructure Protection",
-      "National Defense Cybersecurity", "Cyber Warfare Strategy", "State-Sponsored Cyber Threats"
+      "National Defense Cybersecurity", "Cyber Warfare Strategy", "State-Sponsored Cyber Threats",
+      "Covert Network NSA advisory", "SOHO Router Botnet", "Volt Typhoon evolution"
     ]
   }
 }

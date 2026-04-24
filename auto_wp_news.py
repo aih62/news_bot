@@ -101,9 +101,11 @@ def calculate_score(entry):
         'investment': 30, 'm&a': 35, 'acquisition': 30, 'merger': 30,
         'standard': 25, 'framework': 25, 'nist': 35, 'sec': 35, 'cisa': 35,
         'government': 20, 'national': 25, 'global': 20, 'market': 20,
-        'ai safety': 40, 'ai governance': 40, 'quantum-safe': 35,
-        'compliance': 25, 'directive': 25, 'legislation': 30,
-        'mythos': 45, 'glasswing': 45, 'red teaming': 35
+        'ai safety': 45, 'ai governance': 40, 'quantum-safe': 35,
+        'compliance': 25, 'directive': 25, 'legislation': 35,
+        'mythos': 45, 'glasswing': 45, 'red teaming': 35,
+        'agentic': 45, 'autonomous': 40, 'covert': 35, 'botnet': 30,
+        'soho': 25, 'nsa': 30, 'advisory': 25, 'state-level': 30
     }
     
     # 2. 산업 리더 및 빅테크 가중치 (High Priority)
@@ -302,8 +304,9 @@ def analyze_news_with_perplexity(news_list, recent_titles):
 
     **[핵심 분석 타겟: 선정 시 가중치 부여]**
     1. **빅테크 및 보안 리딩 기업(Top-Tier):** Palo Alto Networks(플랫폼화), CrowdStrike(EDR/XDR 주도권), Microsoft(SFI 보안 이니셔티브), Zscaler, Google Cloud(Mandiant), Anthropic/OpenAI(AI 보안 및 안전)의 전략적 행보.
-    2. **AI 및 차세대 위협:** AI 모델 취약점(Jailbreak, 탈옥), AI 안전성 프레임워크(Anthropic의 미토스 등), 생성형 AI 기반 사이버 공격 및 방어 전략.
-    3. **글로벌 공급망 및 인프라 정책:** 미국의 사이버 보안 행정명령(EO), EU 사이버 복원력 법안(CRA), SEC의 공시 규제 등 국제적 규범 변화.
+    2. **AI 및 차세대 위협:** 에이전틱 AI(Agentic AI)의 자율적 취약점 탐지 및 공격 체계, AI 안전성 프레임워크(Anthropic의 Mythos 등), 생성형 AI 기반 사이버 공격 및 방어 전략.
+    3. **국가 안보 및 지능형 인프라 위협:** 국가 배후 해킹 그룹의 은밀한 네트워크(Covert Networks), SOHO 라우터 기반 봇넷(Volt Typhoon 등), 글로벌 공급망 보안 표준 및 규제.
+    4. **글로벌 규제 및 정책:** 미국의 사이버 보안 행정명령(EO), EU AI Act 이행, 미국 각 주 정부 단위의 최신 AI 안전 법안(Hawaii, Alabama 등) 및 국제적 규범 변화.
 
     **※ 중복 및 필터링 주의사항:**
     - 다음 리스트에 포함된 제목과 유사한 뉴스는 절대 제외할 것: {json.dumps(recent_titles, ensure_ascii=False)}

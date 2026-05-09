@@ -537,6 +537,26 @@ def post_to_wordpress(news_data, original_news_list):
         else: print(f"발행 실패: {res.status_code} - {res.text}")
     except Exception as e: print(f"포스팅 예외: {e}")
 
+def save_selected_news_to_json(selected_news):
+    """선정된 뉴스 결과를 JSON 파일로 저장하여 다른 에이전트가 활용할 수 있도록 합니다."""
+    try:
+        output_data = []
+        for news in selected_news:
+            output_data.append({
+                "title": news.get("title"),
+                "source_url": news.get("source_url"),
+                "content": news.get("content"),
+                "tags": news.get("tags"),
+                "image_url": news.get("image_url")
+            })
+        
+        file_path = "selected_news.json"
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, ensure_ascii=False, indent=4)
+        print(f"뉴스 선정 결과가 {file_path}에 저장되었습니다. ({len(output_data)}개 기사)")
+    except Exception as e:
+        print(f"JSON 저장 중 오류 발생: {e}")
+
 def main():
     if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):
         print("필수 환경 변수 누락")
@@ -552,6 +572,9 @@ def main():
         print("선정된 뉴스가 없습니다.")
         return
         
+    # 뉴스 선정 결과 저장
+    save_selected_news_to_json(selected_news)
+
     for news in selected_news:
         try:
             post_to_wordpress(news, news_list)

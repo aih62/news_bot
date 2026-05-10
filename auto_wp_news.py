@@ -160,8 +160,9 @@ def get_rss_news():
         "koreajoongangdaily.joins.com", "english.chosun.com", "pulsenews.co.kr", "kedglobal.com",
         "koreaittimes.com", "businesskorea.co.kr", "koreabizwire.com", "donga.com", "hani.co.kr",
         "kyunghyang.com", "maeil.co.kr", "joins.com", "etnews.com", "zdnet.co.kr", "boannews.com",
-        "dailysecu.com", "ddaily.co.kr", "digitaltoday.co.kr", "zdnet.com"
+        "dailysecu.com", "ddaily.co.kr", "digitaltoday.co.kr", "zdnet.com", "korea.net", "arirang.com"
     ]
+    korean_source_blacklist = ["보안뉴스", "데일리시큐", "전자신문", "디지털데일리", "ZDNet Korea", "아이뉴스24", "디지털타임스"]
     exclude_sites = " ".join([f"-site:{site}" for site in korean_media_blacklist])
 
     def extract_image(entry):
@@ -205,6 +206,11 @@ def get_rss_news():
                     link_lower = actual_link.lower()
                     if any(site in link_lower for site in korean_media_blacklist):
                         is_recent = False
+                
+                # 출처 이름 체크
+                source_title = entry.source.get('title', '') if hasattr(entry, 'source') else ''
+                if is_recent and any(ks in source_title for ks in korean_source_blacklist):
+                    is_recent = False
 
                 if is_recent and actual_link not in seen_links:
                     all_entries.append({
@@ -237,6 +243,11 @@ def get_rss_news():
                     link_lower = entry.link.lower()
                     if any(site in link_lower for site in korean_media_blacklist):
                         is_recent = False
+                
+                # 출처 이름 체크
+                source_title = entry.source.get('title', '') if hasattr(entry, 'source') else ''
+                if is_recent and any(ks in source_title for ks in korean_source_blacklist):
+                    is_recent = False
 
                 if is_recent and entry.link not in seen_links:
                     all_entries.append({
@@ -310,7 +321,9 @@ def analyze_news_with_perplexity(news_list, recent_titles):
 
     **※ 중복 및 필터링 주의사항:**
     - 다음 리스트에 포함된 제목과 유사한 뉴스는 절대 제외할 것: {json.dumps(recent_titles, ensure_ascii=False)}
-    - 국내 뉴스는 제외하고, '글로벌 동향'과 '한국 정책에 미칠 영향'에만 집중할 것.
+    - **한국 국내 매체(보안뉴스, 데일리시큐, 전자신문 등)는 보도 내용과 상관없이 무조건 선정에서 제외할 것.**
+    - **분석 시 추가적인 인터넷 검색을 통해 한국어 기사를 수집하거나 포함하지 말고, 철저히 글로벌(해외) 동향과 국제 규제 위주로만 선정할 것.**
+    - '글로벌 동향'과 '한국 정책에 미칠 영향'에만 집중할 것.
 
     **[선정 기준 및 가중치]**
     1. 기업 전략 및 시장 지배력 [40%]: M&A, 플랫폼 통합 전략, 기술 로드맵 변화.

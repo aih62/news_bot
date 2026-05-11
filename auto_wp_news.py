@@ -43,6 +43,15 @@ COMMON_HEADERS = {
 session = requests.Session()
 session.headers.update(COMMON_HEADERS)
 
+def resolve_google_url(url):
+    """구글 뉴스 리다이렉트 URL을 실제 기사 URL로 변환합니다."""
+    if "news.google.com" not in url: return url
+    try:
+        with requests.get(url, timeout=5, allow_redirects=True, headers=COMMON_HEADERS, stream=True) as res:
+            return res.url
+    except:
+        return url
+
 def init_session():
     try:
         res = session.get(WP_SITE_URL, timeout=10, verify=False)
@@ -162,7 +171,11 @@ def get_rss_news():
         "kyunghyang.com", "maeil.co.kr", "joins.com", "etnews.com", "zdnet.co.kr", "boannews.com",
         "dailysecu.com", "ddaily.co.kr", "digitaltoday.co.kr", "zdnet.com", "korea.net", "arirang.com"
     ]
-    korean_source_blacklist = ["보안뉴스", "데일리시큐", "전자신문", "디지털데일리", "ZDNet Korea", "아이뉴스24", "디지털타임스"]
+    korean_source_blacklist = [
+        "보안뉴스", "데일리시큐", "전자신문", "디지털데일리", "ZDNet Korea", "아이뉴스24", "디지털타임스",
+        "지디넷코리아", "지디넷", "연합뉴스", "뉴시스", "동아일보", "중앙일보", "조선일보", "매일경제", "한국경제",
+        "한겨레", "경향신문", "KBS", "MBC", "SBS", "YTN", "JTBC"
+    ]
     exclude_sites = " ".join([f"-site:{site}" for site in korean_media_blacklist])
 
     def extract_image(entry):
@@ -195,7 +208,7 @@ def get_rss_news():
                         is_recent = True
                 
                 # 직접 피드에서도 한국어 포함 기사 엄격 제외
-                if is_recent and re.search('[가-힣]', entry.title):
+                if is_recent and (re.search('[가-힣]', entry.title) or any(ks in entry.title for ks in korean_source_blacklist)):
                     is_recent = False
                 
                 # FeedBurner 원본 링크가 있으면 그것을 사용 (매칭 정확도 향상)
@@ -209,8 +222,9 @@ def get_rss_news():
                 
                 # 출처 이름 체크
                 source_title = entry.source.get('title', '') if hasattr(entry, 'source') else ''
-                if is_recent and any(ks in source_title for ks in korean_source_blacklist):
-                    is_recent = False
+                if is_recent:
+                    if any(ks in source_title for ks in korean_source_blacklist) or re.search('[가-힣]', source_title):
+                        is_recent = False
 
                 if is_recent and actual_link not in seen_links:
                     all_entries.append({
@@ -236,28 +250,32 @@ def get_rss_news():
                     if now - calendar.timegm(entry.published_parsed) > day_in_seconds:
                         is_recent = False
                 
-                if is_recent and re.search('[가-힣]', entry.title):
+                # 제목에서 한국어 및 한국 매체명 체크
+                if is_recent and (re.search('[가-힣]', entry.title) or any(ks in entry.title for ks in korean_source_blacklist)):
                     is_recent = False
-                
-                if is_recent:
-                    link_lower = entry.link.lower()
-                    if any(site in link_lower for site in korean_media_blacklist):
-                        is_recent = False
                 
                 # 출처 이름 체크
                 source_title = entry.source.get('title', '') if hasattr(entry, 'source') else ''
-                if is_recent and any(ks in source_title for ks in korean_source_blacklist):
-                    is_recent = False
-
-                if is_recent and entry.link not in seen_links:
-                    all_entries.append({
-                        "title": entry.title,
-                        "link": entry.link,
-                        "published": getattr(entry, 'published', time.ctime()),
-                        "search_category": category_name,
-                        "rss_image": extract_image(entry)
-                    })
-                    seen_links.add(entry.link)
+                if is_recent:
+                    if any(ks in source_title for ks in korean_source_blacklist) or re.search('[가-힣]', source_title):
+                        is_recent = False
+                
+                # 구글 리다이렉트 URL 해제 및 도메인 체크
+                if is_recent:
+                    actual_link = resolve_google_url(entry.link)
+                    link_lower = actual_link.lower()
+                    if any(site in link_lower for site in korean_media_blacklist):
+                        is_recent = False
+                    
+                    if is_recent and actual_link not in seen_links:
+                        all_entries.append({
+                            "title": entry.title,
+                            "link": actual_link,
+                            "published": getattr(entry, 'published', time.ctime()),
+                            "search_category": category_name,
+                            "rss_image": extract_image(entry)
+                        })
+                        seen_links.add(actual_link)
         except: pass
 
     # 모든 기사에 대해 점수 계산
@@ -321,8 +339,9 @@ def analyze_news_with_perplexity(news_list, recent_titles):
 
     **※ 중복 및 필터링 주의사항:**
     - 다음 리스트에 포함된 제목과 유사한 뉴스는 절대 제외할 것: {json.dumps(recent_titles, ensure_ascii=False)}
-    - **한국 국내 매체(보안뉴스, 데일리시큐, 전자신문 등)는 보도 내용과 상관없이 무조건 선정에서 제외할 것.**
+    - **한국 국내 매체(보안뉴스, 데일리시큐, 전자신문, 지디넷코리아 등 모든 한국 매체)는 보도 내용과 상관없이 무조건 선정에서 제외할 것.**
     - **분석 시 추가적인 인터넷 검색을 통해 한국어 기사를 수집하거나 포함하지 말고, 철저히 글로벌(해외) 동향과 국제 규제 위주로만 선정할 것.**
+    - **모든 기사의 출처는 반드시 영문 매체(예: Reuters, Bloomberg, TechCrunch, Wired, The Hacker News 등)여야 함.**
     - '글로벌 동향'과 '한국 정책에 미칠 영향'에만 집중할 것.
 
     **[선정 기준 및 가중치]**

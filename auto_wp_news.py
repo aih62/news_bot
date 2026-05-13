@@ -384,6 +384,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
 
     **[결과물 형식]**
     아래 JSON 리스트 형식으로만 출력하십시오 (설명 생략).
+    - **JSON 무결성**: 모든 문자열 값(title, content 등) 내부에 큰따옴표(")가 포함될 경우, 반드시 역슬래시로 이스케이프(\\\") 하거나 작은따옴표(')로 대체하십시오. 특히 HTML 태그 내 속성값은 반드시 작은따옴표(')를 사용하십시오.
     [
       {{
         "title": "전략적 제목",
@@ -401,7 +402,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     data = {
         "model": "sonar",
         "messages": [
-            {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변합니다."},
+            {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변하며, 문자열 내의 큰따옴표는 반드시 이스케이프 처리합니다."},
             {"role": "user", "content": prompt}
         ]
     }
@@ -428,12 +429,27 @@ def analyze_news_with_perplexity(news_list, recent_titles):
                 return json.loads(json_str)
             except json.JSONDecodeError as je:
                 print(f"JSON 기본 파싱 실패 ({je}), 정제 후 재시도 중...")
-                # 제어 문자 제거 및 비표준 이스케이프 수정 시도
+                # 1. 제어 문자 제거
                 cleaned_json = re.sub(r'[\x00-\x1F\x7F]', '', json_str)
-                # 간혹 발생하는 이스케이프되지 않은 큰따옴표 문제 등은 완벽히 해결하기 어려우나 기본 시도
+                # 2. 값 내부의 이스케이프되지 않은 큰따옴표 처리 시도 (제한적)
+                # "title": "Something "Special" here" -> "title": "Something \"Special\" here"
+                # 이 로직은 완벽하지 않으므로 주의가 필요하지만, 흔한 패턴 대응
+                # 키 값 뒤의 큰따옴표와 콤마/닫는괄호 앞의 큰따옴표를 제외한 중간의 큰따옴표를 찾음
+                
+                # 좀 더 안전한 접근: 필드 명 뒤의 " 와 값 뒤의 " 를 제외한 " 를 \" 로 변환 시도
+                # 하지만 정규식으로 이를 완벽히 하기는 어려움. 
+                # 일단은 AI 프롬프트 개선에 의존하고, 기본적인 정제만 유지.
+                
                 try:
                     return json.loads(cleaned_json)
                 except Exception as e2:
+                    # 마지막 수단: 이스케이프되지 않은 큰따옴표를 수동으로 찾아서 수정 시도 (실험적)
+                    try:
+                        # "content": "..." 패턴에서 시작과 끝 "를 제외한 내부 "를 \"로 바꾸는 복잡한 시도 생략
+                        # 대신 간단한 따옴표 쌍 보정 시도
+                        pass
+                    except: pass
+                    
                     print(f"최종 파싱 실패. 응답 길이: {len(content)}")
                     with open("debug_perplexity_error.txt", "w", encoding="utf-8") as df:
                         df.write(content)

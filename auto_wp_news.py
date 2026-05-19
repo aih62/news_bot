@@ -33,8 +33,8 @@ if not WP_SITE_URL:
 WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
 # 보장된 기본 이미지 ID (워드프레스 미디어 라이브러리 내 실제 ID)
-GUARANTEED_MEDIA_ID = 3221 
-DEFAULT_IMAGE_URL = "http://ajken.mycafe24.com/wp-content/uploads/2026/03/thedigitalartist-security-4868167_1920.jpg"
+GUARANTEED_MEDIA_ID = 5680 
+DEFAULT_IMAGE_URL = "https://ajken.mycafe24.com/wp-content/uploads/2026/05/thedigitalartist-security.jpg"
 
 # 공통 헤더
 COMMON_HEADERS = {
@@ -362,9 +362,12 @@ def analyze_news_with_perplexity(news_list, recent_titles):
       - **동사적 종결:** '~함', '~강화', '~경고', '~확정' 등 역동적인 느낌으로 마무리할 것.
     - **[서브 헤드라인]**: 파급효과 중심의 한 문장 요약 (`<h3>` 사용).
     - **[핵심 내용 요약]**: `<ul><li>` 구조 사용.
-      - **[다각적 분석 체계]**: 단순히 내용을 요약하지 말고, 4개에서 6개의 `<li>` 항목을 **①기술적 상세 원인, ②기업/국가의 전략적 행보, ③구체적 수치 및 데이터, ④산업계 파급 효과**의 관점에서 균형 있게 구성할 것.
+      - **[다각적 분석 체계]**: 4개에서 6개의 `<li>` 항목을 다음과 같은 비중으로 구성하여 정보와 분석의 균형을 맞출 것:
+        - **① 핵심 사건/기술 개요 (2개 항목):** 해당 뉴스의 가장 핵심적인 사건, 기술적 메커니즘, 발표의 실체를 육하원칙에 기반하여 상세히 요약할 것. 독자가 기사 원문을 보지 않고도 실체를 완벽히 파악할 수 있어야 함.
+        - **② 구체적 데이터 및 근거 (1개 항목):** 기사에서 언급된 수치(%), 금액($), 버전, 공격 규모 등 정량적 데이터를 반드시 포함할 것.
+        - **③ 전략적 배경 및 파급효과 (1~3개 항목):** 해당 사건이 발생한 배경과 산업계/정책에 미칠 영향을 분석할 것.
       - **[정보 밀도 극대화]**: 각 `<li>` 항목은 최소 **160자 이상**의 풍부한 분량을 확보하되, 문장 내에 반드시 기사에서 언급된 **고유 명사(기업, 기술명, 표준 등)를 3개 이상 포함**하여 팩트 중심의 전문성을 유지할 것.
-      - **[구체적 인과관계 서술]**: "~가 발표되었다"는 식의 단순 전달을 금지하고, **"[사건의 배경] -> [구체적 기술/정책 내용] -> [이로 인한 단기적/장기적 변화]"**가 하나의 정교한 문장으로 완결되도록 작성할 것.
+      - **[구체적 인과관계 서술]**: **"[실제 발생한 사건/기술적 상세 내용] -> [이로 인해 변화된 현상] -> [전략적/정책적 의미]"** 순서로 문장이 정교하게 완결되도록 작성할 것.
       - **[추상적 표현 지양]**: '혁신적', '상당한 영향', '기대됨' 등 주관적 형용사 대신, 구체적인 기술적 메커니즘이나 정책적 근거를 바탕으로 서술할 것.
       - 모든 문장은 **'~다', '~하다', '~이다'와 같은 격식 있는 서술형 어미**로 끝맺음할 것.
       - 출처 번호([1], [web:1] 등) 및 인용 표시는 절대 포함하지 말 것.
@@ -374,8 +377,8 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     **[작성 예시]**
     <h3>NIST, 양자 내성 암호 표준 공식 승인… '국가 안보 암호 체계' 전면 전환 예고</h3>
     <ul>
-      <li>미 국립표준기술연구소(NIST)는 수년간의 글로벌 공모를 거쳐 양자 컴퓨터의 연산 공격으로부터 데이터를 안전하게 보호할 수 있는 ML-KEM 등 3종의 양자 내성 암호 알고리즘을 최종 표준으로 공식 승인하며 전 세계 디지털 인프라의 전면적 개편을 선언하였습니다.</li>
-      <li>이번 표준 확정은 고성능 양자 컴퓨팅 기술이 기존 RSA 및 ECC 암호 체계를 무력화할 수 있다는 실질적 위협에 대응하기 위한 조치로 전 세계 공공 및 민간 분야의 데이터 보호 체계를 선제적으로 보강하고 글로벌 IT 공급망의 보안 표준을 상향 평준화시키는 결과를 초래할 것입니다.</li>
+      <li>미 국립표준기술연구소(NIST)는 8년간의 글로벌 공모를 거쳐 양자 컴퓨터의 '쇼어 알고리즘' 공격을 무력화할 수 있는 격자 기반 암호인 ML-KEM(구 Crystals-Kyber) 등 3종의 알고리즘을 최종 표준으로 공식 승인하고 연방 정부 기관의 시스템 전환 가이드라인을 발표하였습니다.</li>
+      <li>이번 표준 확정은 고성능 양자 컴퓨팅 기술이 기존 RSA 및 ECC 암호 체계를 무력화할 수 있다는 실질적 위협에 대응하기 위한 조치로, 데이터 패킷의 크기와 연산 속도 최적화를 통해 기존 네트워크 인프라와의 호환성을 확보하고 글로벌 IT 공급망의 보안 표준을 상향 평준화시키는 결과를 초래할 것입니다.</li>
       <li>(이하 생략 - 실제 작성 시에는 반드시 4~6개의 불렛포인트를 작성할 것)</li>
     </ul>
     <blockquote>이번 사건은 보안이 단순한 기술적 보완재를 넘어 국가의 디지털 주권을 지키는 핵심 생존 요건이 되었음을 시사하며, 한국 정부는 국내 수출 기업의 경쟁력 확보를 위해 국제 표준과의 정합성 확보에 박차를 가해야 합니다.</blockquote>
@@ -552,15 +555,13 @@ def post_to_wordpress(news_data, original_news_list):
     # 본문 내용 가져오기
     content_body = news_data.get('content', '내용 없음')
 
-    # 전략 6: 외부 이미지가 있다면 본문 상단에 <img> 태그 삽입 (FIFU가 이를 감지하여 특성 이미지로 설정)
+    # 전략 A1: 이미지를 직접 업로드하여 특성 이미지로 설정 (가장 안정적)
+    media_id = None
     if target_image and target_image.startswith("http"):
-        print(f"  -> 외부 이미지 URL 사용: {target_image[:60]}...")
-        # 숨겨진 이미지 태그 삽입 (FIFU 감지용, 중복 노출 방지)
-        img_tag = f'<p style="display:none;"><img src="{target_image}" alt="{news_data["title"]}"></p>'
-        content_body = img_tag + content_body
-        media_id = 0 # 외부 이미지를 사용하므로 워드프레스 미디어 ID는 0(또는 없음)으로 설정
-    else:
-        print(f"  -> 이미지를 찾지 못해 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
+        media_id = upload_media_from_url(target_image)
+    
+    if not media_id:
+        print(f"  -> 이미지를 업로드하지 못해 기본 미디어 ID {GUARANTEED_MEDIA_ID}를 사용합니다.")
         media_id = GUARANTEED_MEDIA_ID
 
     tag_ids = [get_or_create_term("tags", t) for t in news_data.get('tags', [])]
@@ -571,12 +572,9 @@ def post_to_wordpress(news_data, original_news_list):
         "content": content_body,
         "status": "publish",
         "categories": [21], # 'News' 카테고리 ID 21 고정
-        "tags": tag_ids
+        "tags": tag_ids,
+        "featured_media": media_id
     }
-    
-    # 미디어 ID가 있는 경우에만 featured_media 필드 추가
-    if media_id > 0:
-        payload["featured_media"] = media_id
     
     try:
         res = session.post(f"{WP_SITE_URL}/wp-json/wp/v2/posts", auth=auth, json=payload, timeout=30, verify=False)

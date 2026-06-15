@@ -136,8 +136,10 @@ def refresh_kakao_token():
                 new_tokens['refresh_token'] = refresh_token
             print("카카오 토큰 갱신 성공!")
             return new_tokens
+        else:
+            print(f"카카오 토큰 갱신 실패: {res.status_code}, {res.text}")
     except Exception as e:
-        print(f"토큰 갱신 실패: {e}")
+        print(f"토큰 갱신 중 예외 발생: {e}")
     return None
 
 def send_kakao_memo(message):

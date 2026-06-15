@@ -38,10 +38,53 @@ DEFAULT_IMAGE_URL = "https://ajken.mycafe24.com/wp-content/uploads/2026/05/thedi
 
 # 공통 헤더
 COMMON_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 session = requests.Session()
 session.headers.update(COMMON_HEADERS)
+
+import asyncio
+from playwright.sync_api import sync_playwright
+
+def get_image_from_webpage_robustly(url):
+    """Playwright를 사용하여 기사 원본 주소에서 이미지를 안정적으로 추출합니다."""
+    if not url or not url.startswith("http"): return None
+    print(f"  Playwright를 이용한 이미지 정밀 추출 시도: {url}")
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            context = browser.new_context(user_agent=COMMON_HEADERS["User-Agent"])
+            page = context.new_page()
+            try:
+                # domcontentloaded만 기다려도 메타 태그는 대부분 로드됨
+                page.goto(url, wait_until="domcontentloaded", timeout=45000)
+                final_url = page.url
+                html_content = page.content()
+                
+                # og:image 또는 twitter:image 추출
+                match = re.search(r'<meta [^>]*property=["\']og:image["\'] [^>]*content=["\']([^"\']+)["\']', html_content)
+                if not match:
+                    match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*property=["\']og:image["\']', html_content)
+                if not match:
+                    match = re.search(r'<meta [^>]*name=["\']twitter:image["\'] [^>]*content=["\']([^"\']+)["\']', html_content)
+                if not match:
+                    match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*name=["\']twitter:image["\']', html_content)
+                
+                if match:
+                    img_url = match.group(1)
+                    img_url = html.unescape(img_url)
+                    if img_url.startswith('/'): img_url = urljoin(final_url, img_url)
+                    # 구글 뉴스 기본 아이콘 및 트래커 제외
+                    if "googleusercontent.com" in img_url or "feedburner.com" in img_url:
+                        return None
+                    return img_url
+            except Exception as e:
+                print(f"    Playwright 내부 오류: {e}")
+            finally:
+                browser.close()
+    except Exception as e:
+        print(f"    Playwright 시작 오류: {e}")
+    return None
 
 def resolve_google_url(url):
     """구글 뉴스 리다이렉트 URL을 실제 기사 URL로 변환합니다."""
@@ -79,10 +122,11 @@ def get_image_from_webpage(url):
     """기사 원본 주소에서 og:image 또는 twitter:image 태그를 추출합니다."""
     if not url or not url.startswith("http"): return None
     try:
-        res = requests.get(url, timeout=10, headers=COMMON_HEADERS, verify=False)
+        # 타임아웃을 20초로 연장하고 리다이렉트를 허용함
+        res = requests.get(url, timeout=20, headers=COMMON_HEADERS, verify=False, allow_redirects=True)
         if res.status_code == 200:
             html_content = res.text
-            # og:image 추출
+            # og:image 추출 (더 유연한 정규식 사용)
             match = re.search(r'<meta [^>]*property=["\']og:image["\'] [^>]*content=["\']([^"\']+)["\']', html_content)
             if not match:
                 match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*property=["\']og:image["\']', html_content)
@@ -93,11 +137,17 @@ def get_image_from_webpage(url):
             if not match:
                 match = re.search(r'<meta [^>]*content=["\']([^"\']+)["\'] [^>]*name=["\']twitter:image["\']', html_content)
             
+            # image_src (Link rel) 추출
+            if not match:
+                match = re.search(r'<link [^>]*rel=["\']image_src["\'] [^>]*href=["\']([^"\']+)["\']', html_content)
+
             if match:
                 img_url = match.group(1)
+                img_url = html.unescape(img_url)
                 if img_url.startswith('/'): img_url = urljoin(url, img_url)
                 return img_url
-    except: pass
+    except Exception as e:
+        print(f"  -> 웹페이지 이미지 추출 중 오류 ({url[:30]}...): {e}")
     return None
 
 def calculate_score(entry):
@@ -263,6 +313,9 @@ def get_rss_news():
                 # 구글 리다이렉트 URL 해제 및 도메인 체크
                 if is_recent:
                     actual_link = resolve_google_url(entry.link)
+                    # URL 정규화: 쿼리 파라미터 제거 및 끝 슬래시 제거
+                    actual_link = actual_link.split('?')[0].split('#')[0].rstrip('/')
+                    
                     link_lower = actual_link.lower()
                     if any(site in link_lower for site in korean_media_blacklist):
                         is_recent = False
@@ -339,6 +392,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
 
     **※ 중복 및 필터링 주의사항:**
     - 다음 리스트에 포함된 제목과 유사한 뉴스는 절대 제외할 것: {json.dumps(recent_titles, ensure_ascii=False)}
+    - **동일한 사건이나 기술에 대한 중복 기사가 선정 목록(10개) 내에 포함되지 않도록 할 것. 가장 정보 가치가 높은 매체의 기사 하나만 선정할 것.**
     - **한국 국내 매체(보안뉴스, 데일리시큐, 전자신문, 지디넷코리아 등 모든 한국 매체)는 보도 내용과 상관없이 무조건 선정에서 제외할 것.**
     - **분석 시 추가적인 인터넷 검색을 통해 한국어 기사를 수집하거나 포함하지 말고, 철저히 글로벌(해외) 동향과 국제 규제 위주로만 선정할 것.**
     - **모든 기사의 출처는 반드시 영문 매체(예: Reuters, Bloomberg, TechCrunch, Wired, The Hacker News 등)여야 함.**
@@ -544,12 +598,23 @@ def post_to_wordpress(news_data, original_news_list):
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
     
     target_image = None
-    source_url = news_data.get('source_url')
+    source_url = news_data.get('source_url', '').rstrip('/')
     for item in original_news_list:
-        if item['link'] == source_url and item.get('rss_image'):
+        item_link = item.get('link', '').rstrip('/')
+        if item_link == source_url and item.get('rss_image'):
             target_image = item['rss_image']
             break
+            
+    # 구글 뉴스 기본 아이콘 체크
+    if target_image and "googleusercontent.com" in target_image:
+        target_image = None
+
     if not target_image: target_image = get_image_from_webpage(source_url)
+    
+    # 여전히 없거나 구글 아이콘인 경우 Playwright 정밀 추출 시도
+    if not target_image or "googleusercontent.com" in target_image:
+        target_image = get_image_from_webpage_robustly(source_url)
+        
     if not target_image: target_image = news_data.get('image_url')
 
     # 본문 내용 가져오기

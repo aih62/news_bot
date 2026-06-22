@@ -102,11 +102,11 @@ def init_session():
     except: pass
 
 def get_recent_post_titles():
-    """워드프레스에서 최근 포스팅된 30개의 제목을 가져옵니다."""
+    """워드프레스에서 최근 포스팅된 10개의 제목을 가져옵니다 (당일 중복 방지용)."""
     print("최근 포스팅된 뉴스 제목 확인 중...")
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    params = {"per_page": 30, "status": "publish"}
+    params = {"per_page": 10, "status": "publish"}  # 30→10: 당일 포스팅만 체크
     try:
         res = session.get(endpoint, auth=auth, params=params, timeout=20, verify=False)
         if res.status_code == 200:
@@ -390,9 +390,11 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     3. **국가 안보 및 지능형 인프라 위협:** 국가 배후 해킹 그룹의 은밀한 네트워크(Covert Networks), SOHO 라우터 기반 봇넷(Volt Typhoon 등), 글로벌 공급망 보안 표준 및 규제.
     4. **글로벌 규제 및 정책:** 미국의 사이버 보안 행정명령(EO), EU AI Act 이행, 미국 각 주 정부 단위의 최신 AI 안전 법안(Hawaii, Alabama 등) 및 국제적 규범 변화.
 
+    **※ 핵심 지침: 반드시 아래 뉴스 리스트에서 정확히 10개를 선정해야 합니다. 후보가 불완전하더라도 가장 가치 있는 순으로 10개를 채워야 합니다.**
+
     **※ 중복 및 필터링 주의사항:**
-    - 다음 리스트에 포함된 제목과 유사한 뉴스는 절대 제외할 것: {json.dumps(recent_titles, ensure_ascii=False)}
-    - **동일한 사건이나 기술에 대한 중복 기사가 선정 목록(10개) 내에 포함되지 않도록 할 것. 가장 정보 가치가 높은 매체의 기사 하나만 선정할 것.**
+    - 다음 리스트에 포함된 제목과 완전히 동일한 뉴스만 제외할 것 (유사한 주제라도 다른 관점이면 포함 가능): {json.dumps(recent_titles, ensure_ascii=False)}
+    - 선정 목록 내에서 완전히 동일한 사건을 다루는 기사가 중복될 경우, 가장 정보 가치가 높은 매체의 기사 하나만 선정할 것.
     - **한국 국내 매체(보안뉴스, 데일리시큐, 전자신문, 지디넷코리아 등 모든 한국 매체)는 보도 내용과 상관없이 무조건 선정에서 제외할 것.**
     - **분석 시 추가적인 인터넷 검색을 통해 한국어 기사를 수집하거나 포함하지 말고, 철저히 글로벌(해외) 동향과 국제 규제 위주로만 선정할 것.**
     - **모든 기사의 출처는 반드시 영문 매체(예: Reuters, Bloomberg, TechCrunch, Wired, The Hacker News 등)여야 함.**
@@ -468,6 +470,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
         response = requests.post("https://api.perplexity.ai/chat/completions", headers=headers, json=data, timeout=300)
         if response.status_code == 200:
             content = response.json()['choices'][0]['message']['content']
+            print(f"  -> Perplexity 응답 길이: {len(content)}자")
             
             # JSON 리스트 형태 추출 시도 (Markdown 코드 블록 기호 제거 및 유연한 추출)
             json_str = content.strip()

@@ -394,7 +394,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
 
     **※ 중복 및 필터링 주의사항:**
     - 다음 리스트에 포함된 제목과 완전히 동일한 뉴스만 제외할 것 (유사한 주제라도 다른 관점이면 포함 가능): {json.dumps(recent_titles, ensure_ascii=False)}
-    - 선정 목록 내에서 완전히 동일한 사건을 다루는 기사가 중복될 경우, 가장 정보 가치가 높은 매체의 기사 하나만 선정할 것.
+    - 완전히 동일한 주제나 사건을 다루는 기사가 여러 개일 경우, 그 중 가장 정보 가치가 높은 1개만 결과에 포함시켜 중복을 피하고, 결과적으로 서로 다른 사건을 다루는 10개의 뉴스가 되도록 구성할 것.
     - **한국 국내 매체(보안뉴스, 데일리시큐, 전자신문, 지디넷코리아 등 모든 한국 매체)는 보도 내용과 상관없이 무조건 선정에서 제외할 것.**
     - **분석 시 추가적인 인터넷 검색을 통해 한국어 기사를 수집하거나 포함하지 말고, 철저히 글로벌(해외) 동향과 국제 규제 위주로만 선정할 것.**
     - **모든 기사의 출처는 반드시 영문 매체(예: Reuters, Bloomberg, TechCrunch, Wired, The Hacker News 등)여야 함.**
@@ -459,7 +459,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     """
 
     data = {
-        "model": "sonar",
+        "model": "sonar-pro",
         "messages": [
             {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변하며, 문자열 내의 큰따옴표는 반드시 이스케이프 처리합니다."},
             {"role": "user", "content": prompt}

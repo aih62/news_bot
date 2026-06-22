@@ -390,7 +390,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     3. **국가 안보 및 지능형 인프라 위협:** 국가 배후 해킹 그룹의 은밀한 네트워크(Covert Networks), SOHO 라우터 기반 봇넷(Volt Typhoon 등), 글로벌 공급망 보안 표준 및 규제.
     4. **글로벌 규제 및 정책:** 미국의 사이버 보안 행정명령(EO), EU AI Act 이행, 미국 각 주 정부 단위의 최신 AI 안전 법안(Hawaii, Alabama 등) 및 국제적 규범 변화.
 
-    **※ 핵심 지침: 반드시 아래 뉴스 리스트에서 정확히 10개를 선정해야 합니다. 후보가 불완전하더라도 가장 가치 있는 순으로 10개를 채워야 합니다.**
+    **※ 핵심 지침: 반드시 아래 뉴스 리스트에서 정확히 10개를 선정하여 JSON 배열을 완성해야 합니다. 1~2개만 선정하고 멈추지 말고, 반드시 10개의 아이템이 모두 포함된 전체 결과를 출력하십시오.**
 
     **※ 중복 및 필터링 주의사항:**
     - 다음 리스트에 포함된 제목과 완전히 동일한 뉴스만 제외할 것 (유사한 주제라도 다른 관점이면 포함 가능): {json.dumps(recent_titles, ensure_ascii=False)}
@@ -463,7 +463,8 @@ def analyze_news_with_perplexity(news_list, recent_titles):
         "messages": [
             {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 JSON 형식으로만 답변하며, 문자열 내의 큰따옴표는 반드시 이스케이프 처리합니다."},
             {"role": "user", "content": prompt}
-        ]
+        ],
+        "max_tokens": 8000
     }
 
     try:

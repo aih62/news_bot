@@ -74,8 +74,8 @@ def get_image_from_webpage_robustly(url):
                     img_url = match.group(1)
                     img_url = html.unescape(img_url)
                     if img_url.startswith('/'): img_url = urljoin(final_url, img_url)
-                    # 구글 뉴스 기본 아이콘 및 트래커 제외
-                    if "googleusercontent.com" in img_url or "feedburner.com" in img_url:
+                    # 구글 뉴스 기본 아이콘 및 트래커 제외 (단, The Hacker News 등이 사용하는 blogger 제외)
+                    if ("googleusercontent.com" in img_url and "blogger" not in img_url) or "feedburner.com" in img_url:
                         return None
                     return img_url
             except Exception as e:
@@ -609,14 +609,14 @@ def post_to_wordpress(news_data, original_news_list):
             target_image = item['rss_image']
             break
             
-    # 구글 뉴스 기본 아이콘 체크
-    if target_image and "googleusercontent.com" in target_image:
+    # 구글 뉴스 기본 아이콘 체크 (The Hacker News의 blogger 이미지는 허용)
+    if target_image and "googleusercontent.com" in target_image and "blogger" not in target_image:
         target_image = None
 
     if not target_image: target_image = get_image_from_webpage(source_url)
     
     # 여전히 없거나 구글 아이콘인 경우 Playwright 정밀 추출 시도
-    if not target_image or "googleusercontent.com" in target_image:
+    if not target_image or ("googleusercontent.com" in target_image and "blogger" not in target_image):
         target_image = get_image_from_webpage_robustly(source_url)
         
     if not target_image: target_image = news_data.get('image_url')

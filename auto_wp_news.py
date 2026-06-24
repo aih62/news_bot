@@ -101,22 +101,41 @@ def init_session():
         print(f"세션 초기화 완료 (Status: {res.status_code})")
     except: pass
 
-def get_recent_post_titles():
-    """워드프레스에서 최근 포스팅된 10개의 제목을 가져옵니다 (당일 중복 방지용)."""
-    print("최근 포스팅된 뉴스 제목 확인 중...")
+def normalize_url(url):
+    """URL을 중복 비교용으로 정규화합니다 (공백/프래그먼트 제거, 끝 슬래시 제거, 소문자화)."""
+    if not url:
+        return ""
+    u = str(url).strip().split('#')[0].rstrip('/')
+    return u.lower()
+
+
+def get_recent_posts_info():
+    """워드프레스에서 최근 포스팅된 글의 제목과 본문 내 출처 URL을 가져옵니다 (중복 방지용).
+
+    제목은 매 실행마다 AI가 새로 생성하므로 식별자로 부적합합니다. 따라서 본문에 포함된
+    원본 기사 URL(`<a href='...' target='_blank'>매체명</a>`)을 정규화하여 별도로 수집해,
+    같은 기사가 다시 포스팅되는 것을 URL 기준으로 차단합니다.
+    """
+    print("최근 포스팅된 뉴스 제목/출처 확인 중...")
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    params = {"per_page": 10, "status": "publish"}  # 30→10: 당일 포스팅만 체크
+    params = {"per_page": 30, "status": "publish"}  # 당일을 넘어선 교차 중복까지 비교
+    titles, source_urls = [], set()
     try:
         res = session.get(endpoint, auth=auth, params=params, timeout=20, verify=False)
         if res.status_code == 200:
             posts = res.json()
-            titles = [html.unescape(post['title']['rendered']) for post in posts]
-            print(f"  -> 최근 {len(titles)}개 포스트 제목 로드 완료.")
-            return titles
+            for post in posts:
+                titles.append(html.unescape(post['title']['rendered']))
+                content_html = post.get('content', {}).get('rendered', '') or ''
+                for href in re.findall(r"href=['\"]([^'\"]+)['\"]", content_html):
+                    if href.startswith("http"):
+                        source_urls.add(normalize_url(href))
+            print(f"  -> 최근 {len(titles)}개 포스트 로드 완료 (출처 URL {len(source_urls)}개 추출).")
+            return titles, source_urls
     except Exception as e:
-        print(f"최근 포스트 제목 가져오기 실패: {e}")
-    return []
+        print(f"최근 포스트 정보 가져오기 실패: {e}")
+    return titles, source_urls
 
 def get_image_from_webpage(url):
     """기사 원본 주소에서 og:image 또는 twitter:image 태그를 추출합니다."""
@@ -788,21 +807,42 @@ def main():
         return
     init_session()
     
-    recent_titles = get_recent_post_titles()
+    recent_titles, recent_urls = get_recent_posts_info()
     news_list = get_rss_news()
-    
+
+    # [1차 방어] 이미 게시된 출처 URL을 가진 후보를 AI 분석 전에 사전 제거
+    if recent_urls:
+        before = len(news_list)
+        news_list = [n for n in news_list if normalize_url(n.get('link')) not in recent_urls]
+        removed = before - len(news_list)
+        if removed:
+            print(f"  -> 이미 게시된 기사 {removed}개를 후보에서 사전 제외했습니다.")
+
     selected_news = analyze_news_with_perplexity(news_list, recent_titles)
-    
+
     if not selected_news:
         print("선정된 뉴스가 없습니다.")
         return
-        
+
     # 뉴스 선정 결과 저장
     save_selected_news_to_json(selected_news)
 
+    # [2차 방어] 포스팅 직전 출처 URL 기준 최종 중복 가드
+    #  - recent_urls: 과거(교차일) 중복 차단
+    #  - posted_this_run: 같은 실행 배치 내에서 AI가 동일 기사를 중복 선정한 경우 차단
+    posted_this_run = set()
     for news in selected_news:
+        norm = normalize_url(news.get('source_url'))
+        if norm and norm in recent_urls:
+            print(f"  -> [중복 건너뜀] 이미 게시된 기사: {news.get('title')}")
+            continue
+        if norm and norm in posted_this_run:
+            print(f"  -> [중복 건너뜀] 이번 실행에서 중복 선정된 기사: {news.get('title')}")
+            continue
         try:
             post_to_wordpress(news, news_list)
+            if norm:
+                posted_this_run.add(norm)
             time.sleep(5)
         except Exception as e: print(f"처리 중 오류: {e}")
 

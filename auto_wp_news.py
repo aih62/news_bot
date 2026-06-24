@@ -372,6 +372,122 @@ def get_rss_news():
     print(f"총 {len(all_entries)}개 수집 -> 중복 제거 및 가치 평가 후 {len(final_candidates)}개 후보 선정.")
     return final_candidates
 
+
+def fix_truncated_json(json_str):
+    """끊어진 JSON 문자열을 괄호 매칭을 기반으로 분석하여 미완성인 마지막 객체를 잘라내고 강제 완성합니다."""
+    json_str = json_str.strip()
+    if not json_str: return "[]"
+    
+    try:
+        import json
+        json.loads(json_str)
+        return json_str
+    except: pass
+    
+    stack = []
+    in_string = False
+    escaped = False
+    last_valid_object_end = -1
+    
+    for i, char in enumerate(json_str):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                in_string = False
+        else:
+            if char == '"':
+                in_string = True
+            elif char == '{':
+                stack.append(('{', i))
+            elif char == '}':
+                if stack:
+                    top_char, top_idx = stack.pop()
+                    # 최상위 배열([)이 항상 스택에 남아있으므로, 객체가 완전히 닫혔을 때는
+                    # 스택 길이가 0이 아니라 1(바깥쪽 배열만 남은 상태)이 된다.
+                    if top_char == '{' and len(stack) == 1:
+                        last_valid_object_end = i
+            elif char == '[':
+                stack.append(('[', i))
+            elif char == ']':
+                if stack:
+                    top_char, top_idx = stack.pop()
+    
+    if last_valid_object_end != -1:
+        repaired = json_str[:last_valid_object_end+1].strip()
+        if repaired.endswith(','):
+            repaired = repaired[:-1].strip()
+        if not repaired.startswith('['):
+            repaired = '[' + repaired
+        repaired += ']'
+        return repaired
+        
+    # 미완성 객체 마크다운 밖에서도 괄호 매칭 복구 (폴백)
+    fixed_chars = []
+    stack = []
+    in_string = False
+    escaped = False
+    
+    for char in json_str:
+        fixed_chars.append(char)
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == '\\':
+                escaped = True
+            elif char == '"':
+                in_string = False
+        else:
+            if char == '"':
+                in_string = True
+            elif char in ('[', '{'):
+                stack.append(char)
+            elif char in (']', '}'):
+                if stack:
+                    top = stack[-1]
+                    if (char == ']' and top == '[') or (char == '}' and top == '{'):
+                        stack.pop()
+    
+    if in_string:
+        fixed_chars.append('"')
+        
+    while stack:
+        top = stack.pop()
+        if top == '[':
+            temp_str = "".join(fixed_chars).strip()
+            if temp_str.endswith(','):
+                fixed_chars = list(temp_str[:-1])
+            fixed_chars.append(']')
+        elif top == '{':
+            temp_str = "".join(fixed_chars).strip()
+            if temp_str.endswith(','):
+                fixed_chars = list(temp_str[:-1])
+            fixed_chars.append('}')
+            
+    return "".join(fixed_chars)
+
+def repair_json_fields(json_str):
+    """JSON 문자열 내 필드 값 내부의 이스케이프되지 않은 큰따옴표를 이스케이프 처리합니다."""
+    import re
+    cleaned = re.sub(r'[\x00-\x1F\x7F]', '', json_str)
+    
+    def escape_inside(match):
+        field_part = match.group(1)
+        val_part = match.group(2)
+        end_part = match.group(3)
+        # 이스케이프되지 않은 큰따옴표를 찾아서 \"로 변환
+        val_part_fixed = re.sub(r'(?<!\\)"', r'\"', val_part)
+        return f'{field_part}"{val_part_fixed}"{end_part}'
+
+    cleaned = re.sub(r'("title"\\s*:\\s*)"([\\s\\S]*?)"(\\s*,\\s*"content")', escape_inside, cleaned)
+    cleaned = re.sub(r'("content"\\s*:\\s*)"([\\s\\S]*?)"(\\s*,\\s*"tags")', escape_inside, cleaned)
+    cleaned = re.sub(r'("image_url"\\s*:\\s*)"([\\s\\S]*?)"(\\s*,\\s*"source_url")', escape_inside, cleaned)
+    cleaned = re.sub(r'("source_url"\\s*:\\s*)"([\\s\\S]*?)"(\\s*\\})', escape_inside, cleaned)
+    return cleaned
+
+
 def analyze_news_with_perplexity(news_list, recent_titles):
     """Perplexity AI를 사용하여 최상급 품질의 뉴스 분석을 수행합니다."""
     if not news_list: return []
@@ -382,7 +498,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
 
     prompt = f"""
     당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'이자, 복잡한 기술 이슈를 정책적 가치로 전환하는 '보안 에듀케이터'입니다.
-    다음 뉴스 리스트에서 **글로벌 보안 뉴스 상위 10개**를 선정하여, 한국 정부 보안 정책 담당자가 즉각적인 의사결정 참고자료로 활용할 수 있도록 요약 및 분석하십시오.
+    다음 뉴스 리스트에서 **글로벌 보안 뉴스 상위 7~8개**를 선정하여, 한국 정부 보안 정책 담당자가 즉각적인 의사결정 참고자료로 활용할 수 있도록 요약 및 분석하십시오.
 
     **[핵심 분석 타겟: 선정 시 가중치 부여]**
     1. **빅테크 및 보안 리딩 기업(Top-Tier):** Palo Alto Networks(플랫폼화), CrowdStrike(EDR/XDR 주도권), Microsoft(SFI 보안 이니셔티브), Zscaler, Google Cloud(Mandiant), Anthropic/OpenAI(AI 보안 및 안전)의 전략적 행보.
@@ -390,11 +506,11 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     3. **국가 안보 및 지능형 인프라 위협:** 국가 배후 해킹 그룹의 은밀한 네트워크(Covert Networks), SOHO 라우터 기반 봇넷(Volt Typhoon 등), 글로벌 공급망 보안 표준 및 규제.
     4. **글로벌 규제 및 정책:** 미국의 사이버 보안 행정명령(EO), EU AI Act 이행, 미국 각 주 정부 단위의 최신 AI 안전 법안(Hawaii, Alabama 등) 및 국제적 규범 변화.
 
-    **※ 핵심 지침: 반드시 아래 뉴스 리스트에서 정확히 10개를 선정하여 JSON 배열을 완성해야 합니다. 1~2개만 선정하고 멈추지 말고, 반드시 10개의 아이템이 모두 포함된 전체 결과를 출력하십시오.**
+    **※ 핵심 지침: 반드시 아래 뉴스 리스트에서 정확히 7~8개를 선정하여 JSON 배열을 완성해야 합니다. 1~2개만 선정하고 멈추지 말고, 반드시 7~8개의 아이템이 모두 포함된 전체 결과를 출력하십시오.**
 
     **※ 중복 및 필터링 주의사항:**
     - 다음 리스트에 포함된 제목과 완전히 동일한 뉴스만 제외할 것 (유사한 주제라도 다른 관점이면 포함 가능): {json.dumps(recent_titles, ensure_ascii=False)}
-    - 완전히 동일한 주제나 사건을 다루는 기사가 여러 개일 경우, 그 중 가장 정보 가치가 높은 1개만 결과에 포함시켜 중복을 피하고, 결과적으로 서로 다른 사건을 다루는 10개의 뉴스가 되도록 구성할 것.
+    - 완전히 동일한 주제나 사건을 다루는 기사가 여러 개일 경우, 그 중 가장 정보 가치가 높은 1개만 결과에 포함시켜 중복을 피하고, 결과적으로 서로 다른 사건을 다루는 7~8개의 뉴스가 되도록 구성할 것.
     - **한국 국내 매체(보안뉴스, 데일리시큐, 전자신문, 지디넷코리아 등 모든 한국 매체)는 보도 내용과 상관없이 무조건 선정에서 제외할 것.**
     - **분석 시 추가적인 인터넷 검색을 통해 한국어 기사를 수집하거나 포함하지 말고, 철저히 글로벌(해외) 동향과 국제 규제 위주로만 선정할 것.**
     - **모든 기사의 출처는 반드시 영문 매체(예: Reuters, Bloomberg, TechCrunch, Wired, The Hacker News 등)여야 함.**
@@ -418,24 +534,24 @@ def analyze_news_with_perplexity(news_list, recent_titles):
       - **동사적 종결:** '~함', '~강화', '~경고', '~확정' 등 역동적인 느낌으로 마무리할 것.
     - **[서브 헤드라인]**: 파급효과 중심의 한 문장 요약 (`<h3>` 사용).
     - **[핵심 내용 요약]**: `<ul><li>` 구조 사용.
-      - **[다각적 분석 체계]**: 4개에서 6개의 `<li>` 항목을 다음과 같은 비중으로 구성하여 정보와 분석의 균형을 맞출 것:
-        - **① 핵심 사건/기술 개요 (2개 항목):** 해당 뉴스의 가장 핵심적인 사건, 기술적 메커니즘, 발표의 실체를 육하원칙에 기반하여 상세히 요약할 것. 독자가 기사 원문을 보지 않고도 실체를 완벽히 파악할 수 있어야 함.
+      - **[다각적 분석 체계]**: **2개에서 3개의 `<li>` 항목**을 다음과 같은 비중으로 구성하여 정보와 분석의 균형을 맞출 것:
+        - **① 핵심 사건/기술 개요 (1~2개 항목):** 해당 뉴스의 가장 핵심적인 사건, 기술적 메커니즘, 발표의 실체를 육하원칙에 기반하여 요약할 것.
         - **② 구체적 데이터 및 근거 (1개 항목):** 기사에서 언급된 수치(%), 금액($), 버전, 공격 규모 등 정량적 데이터를 반드시 포함할 것.
-        - **③ 전략적 배경 및 파급효과 (1~3개 항목):** 해당 사건이 발생한 배경과 산업계/정책에 미칠 영향을 분석할 것.
-      - **[정보 밀도 극대화]**: 각 `<li>` 항목은 최소 **160자 이상**의 풍부한 분량을 확보하되, 문장 내에 반드시 기사에서 언급된 **고유 명사(기업, 기술명, 표준 등)를 3개 이상 포함**하여 팩트 중심의 전문성을 유지할 것.
+        - **③ 전략적 배경 및 파급효과 (1개 항목):** 해당 사건이 발생한 배경과 산업계/정책에 미칠 영향을 분석할 것.
+      - **[정보 밀도 극대화]**: 각 `<li>` 항목은 **약 80자에서 110자 내외**의 조밀하고 풍부한 분량을 확보하되, 문장 내에 반드시 기사에서 언급된 **고유 명사(기업, 기술명, 표준 등)를 2개 이상 포함**하여 팩트 중심의 전문성을 유지할 것.
       - **[구체적 인과관계 서술]**: **"[실제 발생한 사건/기술적 상세 내용] -> [이로 인해 변화된 현상] -> [전략적/정책적 의미]"** 순서로 문장이 정교하게 완결되도록 작성할 것.
       - **[추상적 표현 지양]**: '혁신적', '상당한 영향', '기대됨' 등 주관적 형용사 대신, 구체적인 기술적 메커니즘이나 정책적 근거를 바탕으로 서술할 것.
       - 모든 문장은 **'~다', '~하다', '~이다'와 같은 격식 있는 서술형 어미**로 끝맺음할 것.
       - 출처 번호([1], [web:1] 등) 및 인용 표시는 절대 포함하지 말 것.
-    - **[전문가 코멘트]**: `<blockquote>` 사용. 정책 담당자를 위한 행동 권고를 포함하여 150자 내외로 작성할 것.
+    - **[전문가 코멘트]**: `<blockquote>` 사용. 정책 담당자를 위한 행동 권고를 포함하여 100자 내외로 작성할 것.
     - **[주요 용어 설명]**: 전문가 코멘트 아래, 출처 바로 위에 별도의 `<p>` 태그로 구성. (형식: `<strong>주요 용어:</strong> 용어(의미), 용어(의미)`)
 
     **[작성 예시]**
     <h3>NIST, 양자 내성 암호 표준 공식 승인… '국가 안보 암호 체계' 전면 전환 예고</h3>
     <ul>
-      <li>미 국립표준기술연구소(NIST)는 8년간의 글로벌 공모를 거쳐 양자 컴퓨터의 '쇼어 알고리즘' 공격을 무력화할 수 있는 격자 기반 암호인 ML-KEM(구 Crystals-Kyber) 등 3종의 알고리즘을 최종 표준으로 공식 승인하고 연방 정부 기관의 시스템 전환 가이드라인을 발표하였습니다.</li>
+      <li>미 국립표준기술연구소(NIST)는 8년간의 글로벌 공모를 거쳐 양자 컴퓨터의 '쇼어 알고리즘' 공격을 무력화할 수 있는 격자 기반 암호인 ML-KEM 등 3종의 알고리즘을 최종 표준으로 공식 승인하고 연방 정부 기관의 시스템 전환 가이드라인을 발표하였습니다.</li>
       <li>이번 표준 확정은 고성능 양자 컴퓨팅 기술이 기존 RSA 및 ECC 암호 체계를 무력화할 수 있다는 실질적 위협에 대응하기 위한 조치로, 데이터 패킷의 크기와 연산 속도 최적화를 통해 기존 네트워크 인프라와의 호환성을 확보하고 글로벌 IT 공급망의 보안 표준을 상향 평준화시키는 결과를 초래할 것입니다.</li>
-      <li>(이하 생략 - 실제 작성 시에는 반드시 4~6개의 불렛포인트를 작성할 것)</li>
+      <li>(이하 생략 - 실제 작성 시에는 반드시 2~3개의 불렛포인트를 작성할 것)</li>
     </ul>
     <blockquote>이번 사건은 보안이 단순한 기술적 보완재를 넘어 국가의 디지털 주권을 지키는 핵심 생존 요건이 되었음을 시사하며, 한국 정부는 국내 수출 기업의 경쟁력 확보를 위해 국제 표준과의 정합성 확보에 박차를 가해야 합니다.</blockquote>
     <p><strong>주요 용어:</strong> 양자 내성 암호(양자 컴퓨터의 강력한 연산 공격에도 견딜 수 있도록 설계된 차세대 암호 체계), NIST(미국 표준 기술 연구소로 글로벌 IT 표준을 주도하는 기관)</p>
@@ -443,7 +559,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
 
     **[결과물 형식]**
     아래 JSON 리스트 형식으로만 출력하십시오 (설명 생략).
-    - **JSON 무결성**: 모든 문자열 값(title, content 등) 내부에 큰따옴표(")가 포함될 경우, 반드시 역슬래시로 이스케이프(\\\") 하거나 작은따옴표(')로 대체하십시오. 특히 HTML 태그 내 속성값은 반드시 작은따옴표(')를 사용하십시오.
+    - **JSON 무결성**: 모든 문자열 값(title, content 등) 내부에 큰따옴표(")가 포함될 경우, 반드시 역슬래시로 이스케이프(\") 하거나 작은따옴표(')로 대체하십시오. 특히 HTML 태그 내 속성값은 반드시 작은따옴표(')를 사용하십시오.
     [
       {{
         "title": "전략적 제목",
@@ -490,27 +606,20 @@ def analyze_news_with_perplexity(news_list, recent_titles):
                 return json.loads(json_str)
             except json.JSONDecodeError as je:
                 print(f"JSON 기본 파싱 실패 ({je}), 정제 후 재시도 중...")
-                # 1. 제어 문자 제거
-                cleaned_json = re.sub(r'[\x00-\x1F\x7F]', '', json_str)
-                # 2. 값 내부의 이스케이프되지 않은 큰따옴표 처리 시도 (제한적)
-                # "title": "Something "Special" here" -> "title": "Something \"Special\" here"
-                # 이 로직은 완벽하지 않으므로 주의가 필요하지만, 흔한 패턴 대응
-                # 키 값 뒤의 큰따옴표와 콤마/닫는괄호 앞의 큰따옴표를 제외한 중간의 큰따옴표를 찾음
-                
-                # 좀 더 안전한 접근: 필드 명 뒤의 " 와 값 뒤의 " 를 제외한 " 를 \" 로 변환 시도
-                # 하지만 정규식으로 이를 완벽히 하기는 어려움. 
-                # 일단은 AI 프롬프트 개선에 의존하고, 기본적인 정제만 유지.
                 
                 try:
-                    return json.loads(cleaned_json)
-                except Exception as e2:
-                    # 마지막 수단: 이스케이프되지 않은 큰따옴표를 수동으로 찾아서 수정 시도 (실험적)
-                    try:
-                        # "content": "..." 패턴에서 시작과 끝 "를 제외한 내부 "를 \"로 바꾸는 복잡한 시도 생략
-                        # 대신 간단한 따옴표 쌍 보정 시도
-                        pass
-                    except: pass
+                    # 1. 괄호 매칭을 통해 끊겨진 JSON 강제 복구
+                    #    rfind(']')로 잘라낸 json_str은 응답이 truncate된 경우 객체 중간에서
+                    #    잘려 복구를 방해하므로, 원본 응답의 첫 '[' 이후 전체를 넘겨
+                    #    마지막으로 '완성된' 객체까지만 안전하게 살린다.
+                    bracket_start = content.find('[')
+                    recover_target = content[bracket_start:] if bracket_start != -1 else json_str
+                    repaired_json = fix_truncated_json(recover_target)
+                    # 2. 필드 내부의 이스케이프되지 않은 큰따옴표 보정
+                    repaired_json = repair_json_fields(repaired_json)
                     
+                    return json.loads(repaired_json)
+                except Exception as e2:
                     print(f"최종 파싱 실패. 응답 길이: {len(content)}")
                     with open("debug_perplexity_error.txt", "w", encoding="utf-8") as df:
                         df.write(content)
@@ -521,6 +630,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     except Exception as e:
         print(f"AI 분석 중 예외 발생: {e}")
     return []
+
 
 def upload_media_from_url(image_url):
     """이미지를 다운로드하여 WebP로 압축한 후 워드프레스에 업로드하고 ID를 반환합니다."""

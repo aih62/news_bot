@@ -255,12 +255,47 @@ def send_kakao_memo(message):
         print(f"전송 실패: {res.status_code}, {res.text}")
         return False
 
+def verify_secret_save():
+    """GH_PAT의 Secret 쓰기 권한을 즉시 검증합니다 (알림 전송 없음).
+
+    자동 저장은 refresh token이 회전할 때(약 1개월 뒤)만 실행되므로, PAT 권한이 잘못돼도
+    그때까지 드러나지 않습니다. 이 모드는 현재 토큰을 그대로 다시 저장(멱등)해봄으로써
+    쓰기 권한을 지금 확인합니다.
+    """
+    print("=== GH_PAT Secret 쓰기 권한 검증 모드 (카카오톡 전송 안 함) ===")
+    if not GH_PAT:
+        print("GH_PAT가 설정되지 않았습니다.")
+        sys.exit(1)
+
+    tokens = refresh_kakao_token()
+    if not tokens:
+        print("토큰 갱신 실패 - KAKAO_TOKEN_JSON을 먼저 확인하세요.")
+        sys.exit(1)
+
+    ok = save_tokens_to_github_secret({
+        "access_token": tokens.get("access_token"),
+        "refresh_token": tokens.get("refresh_token"),
+    })
+    if ok:
+        print("\n검증 성공: refresh token 회전 시 자동 저장이 정상 동작합니다.")
+        sys.exit(0)
+
+    print("\n검증 실패: GH_PAT의 권한(Repository permissions -> Secrets: Read and write)과 "
+          "대상 저장소 설정을 확인하세요.")
+    sys.exit(1)
+
+
 def main():
+    # 검증 모드: 워크플로에서 verify_secret_save 입력으로 실행 가능
+    if "--verify-secret-save" in sys.argv:
+        verify_secret_save()
+        return
+
     posts = get_today_posts()
     if not posts:
         print("오늘 올라온 포스팅이 없습니다.")
         return
-        
+
     message = format_message(posts)
     print("--- 생성된 메시지 ---")
     print(message)

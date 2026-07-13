@@ -2,6 +2,7 @@ requests
 feedparser
 beautifulsoup4
 python-dotenv
+PyNaCl
 Pillow
 notebooklm-py
 google-api-python-client

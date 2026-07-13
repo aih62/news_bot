@@ -31,4 +31,8 @@ jobs:
           WP_SITE_URL: ${{ secrets.WP_SITE_URL }}
           KAKAO_TOKEN_JSON: ${{ secrets.KAKAO_TOKEN_JSON }}
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
+          # 회전된 refresh token을 KAKAO_TOKEN_JSON Secret에 자동 저장하기 위한 PAT
+          # (secrets:write 권한 필요. 미설정 시 자동 저장만 건너뛰고 알림은 정상 동작)
+          GH_PAT: ${{ secrets.GH_PAT }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: python kakao_summary.py

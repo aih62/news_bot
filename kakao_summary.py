@@ -1,6 +1,7 @@
 import requests
 import json
 import os
+import sys
 from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 import html
@@ -17,6 +18,11 @@ if not WP_SITE_URL or WP_SITE_URL.strip() == "":
 WP_SITE_URL = WP_SITE_URL.rstrip('/')
 KAKAO_TOKEN_JSON = os.getenv("KAKAO_TOKEN_JSON") # JSON string from GitHub Secrets
 REST_API_KEY = os.getenv("KAKAO_REST_API_KEY")
+
+# 갱신된 토큰을 GitHub Secret에 되쓰기 위한 설정
+GH_PAT = os.getenv("GH_PAT")                          # secrets:write 권한 PAT
+GITHUB_REPOSITORY = os.getenv("GITHUB_REPOSITORY")    # Actions가 자동 주입 (owner/repo)
+KAKAO_SECRET_NAME = "KAKAO_TOKEN_JSON"
 
 def get_kst_today():
     """한국 시간(KST) 기준으로 오늘 날짜 문자열(YYYY-MM-DD)을 반환합니다."""
@@ -112,32 +118,102 @@ def format_message(posts):
         
     return msg.strip()
 
+def save_tokens_to_github_secret(tokens):
+    """갱신된 카카오 토큰을 GitHub Actions Secret에 다시 저장합니다.
+
+    카카오 refresh token은 유효기간이 2개월이며, 만료가 임박하면 갱신 시 새 토큰으로
+    교체(rotate)됩니다. 회전된 refresh token을 저장하지 않으면 기존 토큰이 결국 만료되어
+    KOE322(expired_or_invalid_refresh_token)가 발생하므로, Secret에 되써서 이를 예방합니다.
+    """
+    if not GH_PAT or not GITHUB_REPOSITORY:
+        print("  -> GH_PAT/GITHUB_REPOSITORY 미설정: Secret 자동 저장을 건너뜁니다.")
+        return False
+
+    try:
+        from nacl import encoding, public
+    except ImportError:
+        print("  -> PyNaCl 미설치: Secret 자동 저장을 건너뜁니다.")
+        return False
+
+    api = f"https://api.github.com/repos/{GITHUB_REPOSITORY}/actions/secrets"
+    headers = {
+        "Authorization": f"Bearer {GH_PAT}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    try:
+        # 1. 저장소 공개키 조회
+        res = requests.get(f"{api}/public-key", headers=headers, timeout=20)
+        if res.status_code != 200:
+            print(f"  -> 공개키 조회 실패: {res.status_code}, {res.text[:150]}")
+            return False
+        pk = res.json()
+
+        # 2. libsodium sealed box로 암호화 (GitHub Secret 규격)
+        pub_key = public.PublicKey(pk["key"].encode(), encoding.Base64Encoder())
+        sealed = public.SealedBox(pub_key).encrypt(
+            json.dumps(tokens, ensure_ascii=False).encode("utf-8")
+        )
+        encrypted_value = encoding.Base64Encoder().encode(sealed).decode("utf-8")
+
+        # 3. Secret 업데이트
+        res = requests.put(
+            f"{api}/{KAKAO_SECRET_NAME}",
+            headers=headers,
+            json={"encrypted_value": encrypted_value, "key_id": pk["key_id"]},
+            timeout=20,
+        )
+        if res.status_code in (201, 204):
+            print(f"  -> GitHub Secret '{KAKAO_SECRET_NAME}' 자동 갱신 완료.")
+            return True
+        print(f"  -> Secret 업데이트 실패: {res.status_code}, {res.text[:150]}")
+    except Exception as e:
+        print(f"  -> Secret 저장 중 예외 발생: {e}")
+    return False
+
+
 def refresh_kakao_token():
     """리프레시 토큰을 사용하여 액세스 토큰을 갱신합니다."""
     if not KAKAO_TOKEN_JSON or not REST_API_KEY:
         return None
-        
+
     try:
         tokens = json.loads(KAKAO_TOKEN_JSON)
         refresh_token = tokens.get("refresh_token")
-        
+
         url = "https://kauth.kakao.com/oauth/token"
         data = {
             "grant_type": "refresh_token",
             "client_id": REST_API_KEY,
             "refresh_token": refresh_token
         }
-        
+
         res = requests.post(url, data=data)
         if res.status_code == 200:
             new_tokens = res.json()
+            # 카카오는 refresh token 만료가 1개월 미만으로 남았을 때만 새 토큰을 내려준다.
+            rotated = bool(new_tokens.get("refresh_token")) and new_tokens["refresh_token"] != refresh_token
+
             # 기존 리프레시 토큰이 유지되는 경우가 많으므로 병합
             if 'refresh_token' not in new_tokens:
                 new_tokens['refresh_token'] = refresh_token
             print("카카오 토큰 갱신 성공!")
+
+            # refresh token이 회전된 경우에만 Secret에 되써서 만료(KOE322)를 예방
+            if rotated:
+                print("  -> refresh token이 회전되었습니다. GitHub Secret에 저장합니다.")
+                save_tokens_to_github_secret({
+                    "access_token": new_tokens.get("access_token"),
+                    "refresh_token": new_tokens.get("refresh_token"),
+                })
+
             return new_tokens
         else:
             print(f"카카오 토큰 갱신 실패: {res.status_code}, {res.text}")
+            if "KOE322" in res.text or "invalid_grant" in res.text:
+                print("  ** refresh token이 만료/폐기되었습니다. kakao_auth_helper.py로 재인증 후 "
+                      f"'{KAKAO_SECRET_NAME}' Secret을 갱신하세요. **")
     except Exception as e:
         print(f"토큰 갱신 중 예외 발생: {e}")
     return None
@@ -188,8 +264,11 @@ def main():
     message = format_message(posts)
     print("--- 생성된 메시지 ---")
     print(message)
-    
-    send_kakao_memo(message)
+
+    # 전송 실패 시 워크플로를 실패 처리하여 GitHub 알림을 받도록 함
+    # (refresh token 만료 등 재인증이 필요한 상황을 놓치지 않기 위함)
+    if not send_kakao_memo(message):
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

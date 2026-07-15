@@ -169,6 +169,31 @@ def get_image_from_webpage(url):
         print(f"  -> 웹페이지 이미지 추출 중 오류 ({url[:30]}...): {e}")
     return None
 
+def get_image_via_microlink(url):
+    """Microlink API로 기사 대표 이미지를 추출합니다.
+
+    BleepingComputer 등 Cloudflare로 봇을 차단하는 사이트는 requests/Playwright(헤드리스)로
+    og:image를 가져올 수 없다. Microlink는 페이지를 실제로 렌더링해 대표 이미지를 반환하며,
+    구글뉴스 RSS 리다이렉트 URL도 실제 기사로 해석해 이미지를 준다. 무인증 무료 티어 사용.
+    """
+    if not url or not url.startswith("http"):
+        return None
+    try:
+        res = requests.get("https://api.microlink.io/", params={"url": url},
+                           headers=COMMON_HEADERS, timeout=40, verify=False)
+        if res.status_code == 200:
+            data = res.json().get("data", {}) or {}
+            img = (data.get("image") or {}).get("url")
+            if img and img.startswith("http"):
+                # 구글 기본 아이콘/피드 트래커는 제외 (blogger 이미지는 허용)
+                if ("googleusercontent.com" in img and "blogger" not in img) or "feedburner.com" in img:
+                    return None
+                print(f"  -> Microlink 이미지 추출 성공: {img[:60]}...")
+                return img
+    except Exception as e:
+        print(f"  -> Microlink 이미지 추출 실패: {e}")
+    return None
+
 def calculate_score(entry):
     score = 0
     title = entry['title'].lower()
@@ -763,11 +788,15 @@ def post_to_wordpress(news_data, original_news_list):
         target_image = None
 
     if not target_image: target_image = get_image_from_webpage(source_url)
-    
+
+    # Cloudflare 차단(BleepingComputer 등) 및 구글뉴스 리다이렉트는 Microlink로 우회 추출
+    if not target_image or ("googleusercontent.com" in target_image and "blogger" not in target_image):
+        target_image = get_image_via_microlink(source_url)
+
     # 여전히 없거나 구글 아이콘인 경우 Playwright 정밀 추출 시도
     if not target_image or ("googleusercontent.com" in target_image and "blogger" not in target_image):
         target_image = get_image_from_webpage_robustly(source_url)
-        
+
     if not target_image: target_image = news_data.get('image_url')
 
     # 본문 내용 가져오기

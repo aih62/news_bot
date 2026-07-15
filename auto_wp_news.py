@@ -629,25 +629,41 @@ def analyze_news_with_perplexity(news_list, recent_titles):
                 return json.loads(json_str)
             except json.JSONDecodeError as je:
                 print(f"JSON 기본 파싱 실패 ({je}), 정제 후 재시도 중...")
-                
+
+                # rfind(']')로 잘라낸 json_str은 응답이 truncate/중간 손상된 경우 객체 중간에서
+                # 잘려 복구를 방해하므로, 원본 응답의 첫 '[' 이후 전체를 복구 대상으로 삼는다.
+                bracket_start = content.find('[')
+                recover_target = content[bracket_start:] if bracket_start != -1 else json_str
+
+                # [1순위] json-repair 라이브러리로 malformed JSON 복구.
+                #  잘림, 이스케이프되지 않은 큰따옴표, trailing comma 등 LLM 응답의
+                #  다양한 손상 유형을 폭넓게 처리한다.
                 try:
-                    # 1. 괄호 매칭을 통해 끊겨진 JSON 강제 복구
-                    #    rfind(']')로 잘라낸 json_str은 응답이 truncate된 경우 객체 중간에서
-                    #    잘려 복구를 방해하므로, 원본 응답의 첫 '[' 이후 전체를 넘겨
-                    #    마지막으로 '완성된' 객체까지만 안전하게 살린다.
-                    bracket_start = content.find('[')
-                    recover_target = content[bracket_start:] if bracket_start != -1 else json_str
+                    from json_repair import repair_json
+                    repaired = repair_json(recover_target, return_objects=True)
+                    if isinstance(repaired, list):
+                        # source_url은 중복 제거·이미지 추출에 필수이므로, 이를 갖춘 항목만 채택해
+                        # 잘려 완성되지 못한 마지막 항목 등을 안전하게 제외한다.
+                        valid = [it for it in repaired
+                                 if isinstance(it, dict) and it.get('title')
+                                 and it.get('content') and it.get('source_url')]
+                        if valid:
+                            print(f"  -> json-repair 복구 성공 ({len(valid)}/{len(repaired)}개 유효 항목).")
+                            return valid
+                except Exception as e_lib:
+                    print(f"  -> json-repair 복구 실패: {e_lib}")
+
+                # [2순위] 자체 복구 로직 (라이브러리 미설치 등 폴백)
+                try:
                     repaired_json = fix_truncated_json(recover_target)
-                    # 2. 필드 내부의 이스케이프되지 않은 큰따옴표 보정
                     repaired_json = repair_json_fields(repaired_json)
-                    
                     return json.loads(repaired_json)
                 except Exception as e2:
                     print(f"최종 파싱 실패. 응답 길이: {len(content)}")
                     with open("debug_perplexity_error.txt", "w", encoding="utf-8") as df:
                         df.write(content)
                     print(f"디버그 정보가 debug_perplexity_error.txt에 저장되었습니다.")
-                    raise e2
+                    return []
         else:
             print(f"API 호출 실패 (Status: {response.status_code}): {response.text}")
     except Exception as e:

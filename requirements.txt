@@ -3,6 +3,7 @@ feedparser
 beautifulsoup4
 python-dotenv
 PyNaCl
+json-repair
 Pillow
 notebooklm-py
 google-api-python-client

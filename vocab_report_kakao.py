@@ -62,8 +62,17 @@ def week_lesson(now=None):
     return lesson, lesson // 5, dow, now
 
 
+def _asdict(x):
+    # PHP가 순차키 dict를 JSON 리스트로 저장하는 경우까지 흡수
+    if isinstance(x, dict):
+        return x
+    if isinstance(x, list):
+        return {str(i): v for i, v in enumerate(x)}
+    return {}
+
+
 def _learned(k):
-    return k.get("learned") or {}
+    return _asdict(k.get("learned"))
 
 
 def lesson_done(k, l):
@@ -135,10 +144,10 @@ def fmt_weekly(state):
         p = PROFILES[kid]
         dw = days_in_week(k, week)
         ww = words_in_week(k, week)
-        tests = k.get("tests") or {}
+        tests = _asdict(k.get("tests"))
         test = tests.get(str(week))
         testpass = isinstance(test, (int, float)) and test >= 70
-        claimed = (k.get("claimed") or {}).get(str(week))
+        claimed = _asdict(k.get("claimed")).get(str(week))
         allowance = k.get("allowance") or p["allowance"]
         test_txt = (f"{int(test)}점 " + ("✅" if testpass else "❌")) if test is not None else "미응시"
         if claimed:

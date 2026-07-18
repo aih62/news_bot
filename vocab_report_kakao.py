@@ -1,0 +1,206 @@
+# -*- coding: utf-8 -*-
+"""
+우리집 영어 단어 미션 — 학습 결과 카카오톡 발송
+- 매일(--daily): 오늘 아이들의 학습 현황 요약
+- 주간(--weekly): 이번 주 리포트 요약
+- 자동(--auto, 기본): 매일 발송 + 일요일이면 주간 리포트도 발송
+
+카카오 토큰 갱신/전송은 기존 kakao_summary.py 로직을 재사용합니다.
+"""
+import os, sys, json, requests
+from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
+
+import sys as _sys
+try:
+    _sys.stdout.reconfigure(encoding="utf-8")
+    _sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+load_dotenv(override=True)
+from kakao_summary import refresh_kakao_token  # 토큰 갱신(+회전 시 Secret 저장) 재사용
+
+KST = timezone(timedelta(hours=9))
+API = "https://ajken.mycafe24.com/voca/api.php"
+API_KEY = os.getenv("VOCA_API_KEY") or "fam-ajken-7Kq2"
+REPORT_URL = "https://ajken.mycafe24.com/voca/report.html"
+
+START = datetime(2026, 7, 20, tzinfo=KST)  # 프로그램 시작(월)
+LP = 200  # 레슨 수 (1000단어/5)
+
+PROFILES = {
+    "k2": {"name": "첫째 (중2)", "emoji": "🧑‍🎓", "level": "고등", "allowance": 3000},
+    "k1": {"name": "둘째 (초3)", "emoji": "🧒", "level": "초6", "allowance": 2000},
+}
+ORDER = ["k2", "k1"]
+
+
+def fetch_state():
+    r = requests.get(API, params={"k": API_KEY}, timeout=20)
+    r.raise_for_status()
+    try:
+        return r.json() or {}
+    except Exception:
+        return {}
+
+
+def week_lesson(now=None):
+    now = now or datetime.now(KST)
+    diff = (now.date() - START.date()).days
+    if diff < 0:
+        diff = 0
+    weeks, dow = diff // 7, diff % 7  # dow: 0=월 .. 6=일
+    lesson = (weeks * 5 + 4) if dow >= 5 else (weeks * 5 + dow)
+    lesson %= LP
+    return lesson, lesson // 5, dow, now
+
+
+def _learned(k):
+    return k.get("learned") or {}
+
+
+def lesson_done(k, l):
+    a = _learned(k).get(str(l))
+    return bool(a) and len(a) == 5 and all(a)
+
+
+def today_count(k, lesson):
+    a = _learned(k).get(str(lesson)) or []
+    return sum(1 for x in a if x)
+
+
+def total_words(k):
+    return sum(sum(1 for x in a if x) for a in _learned(k).values())
+
+
+def days_in_week(k, w):
+    return sum(1 for l in range(w * 5, w * 5 + 5) if lesson_done(k, l))
+
+
+def words_in_week(k, w):
+    n = 0
+    for l in range(w * 5, w * 5 + 5):
+        a = _learned(k).get(str(l))
+        if a:
+            n += sum(1 for x in a if x)
+    return n
+
+
+def streak(k, lesson):
+    s = 0
+    x = lesson if lesson_done(k, lesson) else lesson - 1
+    while x >= 0:
+        if lesson_done(k, x % LP):
+            s += 1
+        else:
+            break
+        x -= 1
+    return s
+
+
+def name_of(state, kid):
+    return (state.get(kid) or {}).get("name") or PROFILES[kid]["name"]
+
+
+def fmt_daily(state):
+    lesson, week, dow, now = week_lesson()
+    wd = "월화수목금토일"[dow]
+    lines = [f"📚 오늘의 학습  {now.month}월 {now.day}일({wd})", ""]
+    for kid in ORDER:
+        k = state.get(kid) or {}
+        p = PROFILES[kid]
+        tc = today_count(k, lesson)
+        status = "완료 ✅" if tc == 5 else (f"{tc}/5 진행 중" if tc > 0 else "아직 안 함 ⬜")
+        lines.append(f"{p['emoji']} {name_of(state, kid)}")
+        lines.append(f"  오늘 {status} · 연속 {streak(k, lesson)}일🔥 · 이번주 {days_in_week(k, week)}/5일")
+    lines.append("")
+    lines.append("👉 리포트에서 자세히 보기")
+    return "\n".join(lines)
+
+
+def fmt_weekly(state):
+    lesson, week, dow, now = week_lesson()
+    mon = START + timedelta(days=week * 7)
+    fri = mon + timedelta(days=4)
+    lines = [f"📊 주간 리포트  {week + 1}주차 ({mon.month}/{mon.day}~{fri.month}/{fri.day})", ""]
+    for kid in ORDER:
+        k = state.get(kid) or {}
+        p = PROFILES[kid]
+        dw = days_in_week(k, week)
+        ww = words_in_week(k, week)
+        tests = k.get("tests") or {}
+        test = tests.get(str(week))
+        testpass = isinstance(test, (int, float)) and test >= 70
+        claimed = (k.get("claimed") or {}).get(str(week))
+        allowance = k.get("allowance") or p["allowance"]
+        test_txt = (f"{int(test)}점 " + ("✅" if testpass else "❌")) if test is not None else "미응시"
+        if claimed:
+            mission = f"미션 완료·용돈 지급 ✅"
+        elif dw >= 4 and testpass:
+            mission = f"미션 달성·용돈 ₩{allowance:,} 대기 🎁"
+        else:
+            mission = "미션 미완료"
+        lines.append(f"{p['emoji']} {name_of(state, kid)}")
+        lines.append(f"  학습 {dw}/5일 · {ww}단어 · 테스트 {test_txt}")
+        lines.append(f"  {mission} · 누적 {total_words(k):,}단어")
+        lines.append("")
+    return "\n".join(lines).strip()
+
+
+def send(message):
+    tokens = refresh_kakao_token()
+    if not tokens:
+        kj = os.getenv("KAKAO_TOKEN_JSON")
+        if not kj:
+            print("KAKAO_TOKEN_JSON 없음 - 전송 불가")
+            return False
+        tokens = json.loads(kj)
+    access_token = tokens.get("access_token")
+    template = {
+        "object_type": "text",
+        "text": message,
+        "link": {"web_url": REPORT_URL, "mobile_web_url": REPORT_URL},
+        "button_title": "리포트 보기",
+    }
+    res = requests.post(
+        "https://kapi.kakao.com/v2/api/talk/memo/default/send",
+        headers={"Authorization": f"Bearer {access_token}"},
+        data={"template_object": json.dumps(template)},
+        timeout=20,
+    )
+    if res.status_code == 200:
+        print("카카오톡 전송 성공!")
+        return True
+    print(f"전송 실패: {res.status_code}, {res.text[:200]}")
+    return False
+
+
+def main():
+    mode = "auto"
+    if "--daily" in sys.argv:
+        mode = "daily"
+    elif "--weekly" in sys.argv:
+        mode = "weekly"
+    dry = "--dry" in sys.argv
+
+    state = fetch_state()
+    now = datetime.now(KST)
+    ok = True
+
+    if mode in ("daily", "auto"):
+        msg = fmt_daily(state)
+        print("----- 오늘의 학습 -----\n" + msg + "\n")
+        if not dry:
+            ok &= send(msg)
+
+    if mode == "weekly" or (mode == "auto" and now.weekday() == 6):  # 일요일
+        msg = fmt_weekly(state)
+        print("----- 주간 리포트 -----\n" + msg + "\n")
+        if not dry:
+            ok &= send(msg)
+
+    sys.exit(0 if ok else 1)
+
+
+if __name__ == "__main__":
+    main()

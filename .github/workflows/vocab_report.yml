@@ -2,15 +2,18 @@ name: Vocab Study Kakao Report
 
 on:
   schedule:
-    # 매일 한국시간 오후 9시 (UTC 12:00). 일요일에는 주간 리포트도 함께 발송됩니다.
-    - cron: '0 12 * * *'
-  workflow_dispatch:      # 수동 실행 버튼
+    - cron: '0 11 * * *'   # 매일 KST 20:00 — 미완료 리마인드
+    - cron: '0 12 * * *'   # 매일 KST 21:00 — 오늘 요약 (일요일엔 주간 리포트도)
+  workflow_dispatch:
     inputs:
       mode:
-        description: '발송 모드 (auto / daily / weekly)'
+        description: '발송 모드'
         type: choice
         default: 'auto'
-        options: [auto, daily, weekly]
+        options: [auto, daily, weekly, remind, complete]
+      kid:
+        description: "complete 모드 대상 (k1=둘째, k2=첫째)"
+        default: ''
 
 jobs:
   report:
@@ -29,16 +32,21 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Send vocab study report to KakaoTalk
+      - name: Send vocab report to KakaoTalk
         env:
           KAKAO_TOKEN_JSON: ${{ secrets.KAKAO_TOKEN_JSON }}
           KAKAO_REST_API_KEY: ${{ secrets.KAKAO_REST_API_KEY }}
-          # refresh token 회전 시 Secret 자동 저장용 (기존 뉴스 알림과 동일)
           GH_PAT: ${{ secrets.GH_PAT }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          # 선택: 설정 시 api.php 토큰 override (미설정 시 스크립트 기본값 사용)
           VOCA_API_KEY: ${{ secrets.VOCA_API_KEY }}
+          COMPLETE_KID: ${{ github.event.inputs.kid }}
         run: |
+          SCHED="${{ github.event.schedule }}"
           MODE="${{ github.event.inputs.mode }}"
-          if [ -z "$MODE" ]; then MODE="auto"; fi
-          python vocab_report_kakao.py --$MODE
+          if [ -n "$MODE" ]; then
+            python vocab_report_kakao.py --$MODE
+          elif [ "$SCHED" = "0 11 * * *" ]; then
+            python vocab_report_kakao.py --remind
+          else
+            python vocab_report_kakao.py --auto
+          fi

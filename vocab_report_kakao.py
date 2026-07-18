@@ -1,22 +1,28 @@
 # -*- coding: utf-8 -*-
 """
 우리집 영어 단어 미션 — 학습 결과 카카오톡 발송
-- 매일(--daily): 오늘 아이들의 학습 현황 요약
-- 주간(--weekly): 이번 주 리포트 요약
-- 자동(--auto, 기본): 매일 발송 + 일요일이면 주간 리포트도 발송
+  --daily     오늘 아이들의 학습 현황 요약
+  --weekly    이번 주 리포트 요약
+  --auto      매일 발송 + 일요일이면 주간 리포트도 발송 (기본)
+  --remind    오늘 미완료인 아이가 있으면 리마인드 발송 (저녁 스케줄용)
+  --complete <k1|k2>   해당 아이의 '오늘 완료' 즉시 알림 (env COMPLETE_KID 도 가능)
+  --dry       실제 전송 없이 메시지만 출력
 
 카카오 토큰 갱신/전송은 기존 kakao_summary.py 로직을 재사용합니다.
 """
-import os, sys, json, requests
+import os
+import sys
+import json
+import requests
 from datetime import datetime, timezone, timedelta
 from dotenv import load_dotenv
 
-import sys as _sys
 try:
-    _sys.stdout.reconfigure(encoding="utf-8")
-    _sys.stderr.reconfigure(encoding="utf-8")
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
+
 load_dotenv(override=True)
 from kakao_summary import refresh_kakao_token  # 토큰 갱신(+회전 시 Secret 저장) 재사용
 
@@ -33,6 +39,7 @@ PROFILES = {
     "k1": {"name": "둘째 (초3)", "emoji": "🧒", "level": "초6", "allowance": 2000},
 }
 ORDER = ["k2", "k1"]
+NL = chr(10)
 
 
 def fetch_state():
@@ -115,7 +122,7 @@ def fmt_daily(state):
         lines.append(f"  오늘 {status} · 연속 {streak(k, lesson)}일🔥 · 이번주 {days_in_week(k, week)}/5일")
     lines.append("")
     lines.append("👉 리포트에서 자세히 보기")
-    return "\n".join(lines)
+    return NL.join(lines)
 
 
 def fmt_weekly(state):
@@ -135,7 +142,7 @@ def fmt_weekly(state):
         allowance = k.get("allowance") or p["allowance"]
         test_txt = (f"{int(test)}점 " + ("✅" if testpass else "❌")) if test is not None else "미응시"
         if claimed:
-            mission = f"미션 완료·용돈 지급 ✅"
+            mission = "미션 완료·용돈 지급 ✅"
         elif dw >= 4 and testpass:
             mission = f"미션 달성·용돈 ₩{allowance:,} 대기 🎁"
         else:
@@ -144,7 +151,34 @@ def fmt_weekly(state):
         lines.append(f"  학습 {dw}/5일 · {ww}단어 · 테스트 {test_txt}")
         lines.append(f"  {mission} · 누적 {total_words(k):,}단어")
         lines.append("")
-    return "\n".join(lines).strip()
+    return NL.join(lines).strip()
+
+
+def fmt_complete(state, kid):
+    lesson, week, dow, now = week_lesson()
+    k = state.get(kid) or {}
+    p = PROFILES[kid]
+    lines = [
+        "🎉 오늘 학습 완료!",
+        "",
+        f"{p['emoji']} {name_of(state, kid)} 님이 오늘의 단어 5개를 모두 외웠어요.",
+        f"연속 {streak(k, lesson)}일째 🔥 · 이번주 {days_in_week(k, week)}/5일",
+    ]
+    return NL.join(lines)
+
+
+def fmt_remind(state):
+    lesson, week, dow, now = week_lesson()
+    pending = [(kid, state.get(kid) or {}) for kid in ORDER if today_count(state.get(kid) or {}, lesson) < 5]
+    if not pending:
+        return None
+    lines = ["⏰ 오늘 학습 리마인드", ""]
+    for kid, k in pending:
+        p = PROFILES[kid]
+        lines.append(f"{p['emoji']} {name_of(state, kid)} — 오늘 {today_count(k, lesson)}/5, 아직 미완료")
+    lines.append("")
+    lines.append("자기 전에 5개만 외우면 미션 성공! 📚")
+    return NL.join(lines)
 
 
 def send(message):
@@ -176,29 +210,51 @@ def send(message):
 
 
 def main():
-    mode = "auto"
-    if "--daily" in sys.argv:
-        mode = "daily"
-    elif "--weekly" in sys.argv:
-        mode = "weekly"
-    dry = "--dry" in sys.argv
-
+    args = sys.argv
+    dry = "--dry" in args
     state = fetch_state()
     now = datetime.now(KST)
-    ok = True
 
+    # 완료 즉시 알림
+    if "--complete" in args:
+        kid = os.getenv("COMPLETE_KID")
+        i = args.index("--complete")
+        if i + 1 < len(args) and not args[i + 1].startswith("--"):
+            kid = args[i + 1]
+        if kid not in ("k1", "k2"):
+            print(f"잘못된 kid: {kid}")
+            sys.exit(1)
+        msg = fmt_complete(state, kid)
+        print(msg)
+        sys.exit(0 if (dry or send(msg)) else 1)
+
+    # 미완료 리마인드
+    if "--remind" in args:
+        msg = fmt_remind(state)
+        if not msg:
+            print("모두 완료 - 리마인드 없음")
+            sys.exit(0)
+        print(msg)
+        sys.exit(0 if (dry or send(msg)) else 1)
+
+    # 매일 / 주간
+    mode = "auto"
+    if "--daily" in args:
+        mode = "daily"
+    elif "--weekly" in args:
+        mode = "weekly"
+
+    ok = True
     if mode in ("daily", "auto"):
         msg = fmt_daily(state)
-        print("----- 오늘의 학습 -----\n" + msg + "\n")
+        print(msg)
         if not dry:
             ok &= send(msg)
-
-    if mode == "weekly" or (mode == "auto" and now.weekday() == 6):  # 일요일
+    if mode == "weekly" or (mode == "auto" and now.weekday() == 6):
         msg = fmt_weekly(state)
-        print("----- 주간 리포트 -----\n" + msg + "\n")
+        print(msg)
         if not dry:
             ok &= send(msg)
-
     sys.exit(0 if ok else 1)
 
 

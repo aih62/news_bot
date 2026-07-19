@@ -31,7 +31,7 @@ API = "https://ajken.mycafe24.com/voca/api.php"
 API_KEY = os.getenv("VOCA_API_KEY") or "fam-ajken-7Kq2"
 REPORT_URL = "https://ajken.mycafe24.com/voca/report.html"
 
-START = datetime(2026, 7, 20, tzinfo=KST)  # 프로그램 시작(월)
+START = datetime(2026, 7, 18, tzinfo=KST)  # 프로그램 시작 (매일 1레슨)
 LP = 200  # 레슨 수 (1000단어/5)
 
 PROFILES = {
@@ -56,10 +56,8 @@ def week_lesson(now=None):
     diff = (now.date() - START.date()).days
     if diff < 0:
         diff = 0
-    weeks, dow = diff // 7, diff % 7  # dow: 0=월 .. 6=일
-    lesson = (weeks * 5 + 4) if dow >= 5 else (weeks * 5 + dow)
-    lesson %= LP
-    return lesson, lesson // 5, dow, now
+    lesson = diff % LP  # 매일 1레슨(주말 포함)
+    return lesson, lesson // 5, lesson % 5, now
 
 
 def _asdict(x):
@@ -120,7 +118,7 @@ def name_of(state, kid):
 
 def fmt_daily(state):
     lesson, week, dow, now = week_lesson()
-    wd = "월화수목금토일"[dow]
+    wd = "월화수목금토일"[now.weekday()]
     lines = [f"📚 오늘의 학습  {now.month}월 {now.day}일({wd})", ""]
     for kid in ORDER:
         k = state.get(kid) or {}
@@ -136,7 +134,7 @@ def fmt_daily(state):
 
 def fmt_weekly(state):
     lesson, week, dow, now = week_lesson()
-    mon = START + timedelta(days=week * 7)
+    mon = START + timedelta(days=week * 5)
     fri = mon + timedelta(days=4)
     lines = [f"📊 주간 리포트  {week + 1}주차 ({mon.month}/{mon.day}~{fri.month}/{fri.day})", ""]
     for kid in ORDER:

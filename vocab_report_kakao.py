@@ -157,6 +157,11 @@ def fmt_weekly(state):
         lines.append(f"{p['emoji']} {name_of(state, kid)}")
         lines.append(f"  학습 {dw}/5일 · {ww}단어 · 테스트 {test_txt}")
         lines.append(f"  {mission} · 누적 {total_words(k):,}단어")
+        hard = list((k.get("hard") or {}).values())
+        if hard:
+            hw = ", ".join(h.get("en", "") for h in hard[:6] if h.get("en"))
+            if hw:
+                lines.append(f"  📌 복습 필요: {hw}")
         lines.append("")
     return NL.join(lines).strip()
 

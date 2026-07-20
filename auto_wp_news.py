@@ -5,12 +5,13 @@ import re
 from requests.auth import HTTPBasicAuth
 import time
 import calendar
+import concurrent.futures
 import os
 import html
 import urllib3
 import io
 from PIL import Image
-from urllib.parse import quote, urljoin
+from urllib.parse import quote, urljoin, urlparse
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -532,8 +533,282 @@ def repair_json_fields(json_str):
     return cleaned
 
 
+# ══════════════════════════════════════════════════════════════════════
+#  Perplexity 2단계 파이프라인 (선정 → 기사별 본문 생성)
+#   - 구조화 출력(json_schema)으로 API가 JSON 무결성을 보장 → 따옴표 깨짐 원천 차단
+#   - 응답을 잘게 나눠 truncation(잘림) 원천 차단, 실패는 건별로 격리
+# ══════════════════════════════════════════════════════════════════════
+PPLX_ENDPOINT = "https://api.perplexity.ai/chat/completions"
+
+
+def _pplx_chat(data, timeout=180):
+    """Perplexity Chat Completions 호출 후 message content(str)를 반환한다."""
+    headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
+    res = requests.post(PPLX_ENDPOINT, headers=headers, json=data, timeout=timeout)
+    res.raise_for_status()
+    return res.json()['choices'][0]['message']['content']
+
+
+def _parse_lenient(content):
+    """구조화 출력 응답 문자열을 JSON 객체로 파싱한다.
+    기본 파싱 실패 시 json-repair로 복구, 그래도 실패하면 None을 반환한다."""
+    if not content:
+        return None
+    s = content.strip()
+    if "```json" in s:
+        s = s.split("```json")[1].split("```")[0].strip()
+    elif "```" in s:
+        s = s.split("```")[1].split("```")[0].strip()
+    try:
+        return json.loads(s)
+    except json.JSONDecodeError:
+        try:
+            from json_repair import repair_json
+            return repair_json(s, return_objects=True)
+        except Exception:
+            return None
+
+
+# 도메인 → 표기용 매체명 (미등록 도메인은 2차 도메인 캐피털라이즈로 폴백)
+_SOURCE_NAME_MAP = {
+    "thehackernews.com": "The Hacker News",
+    "cyberscoop.com": "CyberScoop",
+    "axios.com": "Axios",
+    "darkreading.com": "Dark Reading",
+    "bleepingcomputer.com": "BleepingComputer",
+    "bankinfosecurity.com": "BankInfoSecurity",
+    "the-decoder.com": "The Decoder",
+    "wired.com": "Wired",
+    "reuters.com": "Reuters",
+    "bloomberg.com": "Bloomberg",
+    "techcrunch.com": "TechCrunch",
+    "theregister.com": "The Register",
+    "securityweek.com": "SecurityWeek",
+    "therecord.media": "The Record",
+    "arstechnica.com": "Ars Technica",
+    "zdnet.com": "ZDNET",
+    "venturebeat.com": "VentureBeat",
+    "scmagazine.com": "SC Media",
+    "helpnetsecurity.com": "Help Net Security",
+    "infosecurity-magazine.com": "Infosecurity Magazine",
+}
+
+
+def _source_name_from_url(url):
+    """URL에서 표기용 매체명을 추출한다(미등록 도메인은 2차 도메인 캐피털라이즈)."""
+    try:
+        host = urlparse(url).netloc.lower()
+    except Exception:
+        return "출처"
+    if host.startswith("www."):
+        host = host[4:]
+    if host in _SOURCE_NAME_MAP:
+        return _SOURCE_NAME_MAP[host]
+    parts = host.split(".")
+    if len(parts) >= 2:
+        return parts[-2].capitalize()
+    return host or "출처"
+
+
+_SELECTION_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "selected": {"type": "array", "items": {"type": "integer"}}
+    },
+    "required": ["selected"],
+}
+
+
+def select_top_news(news_list, recent_titles, want=10):
+    """[1단계] 후보 중 상위 want개의 index만 구조화 출력으로 선정한다.
+    응답이 매우 작아 잘림/깨짐이 없다. 선정 실패 시 점수순 상위 want개로 폴백한다."""
+    indexed = [
+        {"index": i, "title": n.get("title", ""), "source": n.get("search_category", "")}
+        for i, n in enumerate(news_list)
+    ]
+    prompt = f"""당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'입니다.
+아래 후보 뉴스에서 한국 정부 보안 정책 담당자에게 가장 가치 있는 상위 {want}개를 선정하십시오.
+
+[선정 가중치]
+1. 기업 전략·시장 지배력(M&A, 플랫폼 통합, 기술 로드맵): Palo Alto Networks, CrowdStrike, Microsoft, Zscaler, Google Cloud, Anthropic/OpenAI 등 [40%]
+2. AI 보안·미래 기술(에이전틱 AI 위협, AI 안전성 프레임워크, 양자내성암호, 클라우드 네이티브 보안) [25%]
+3. 글로벌 규제·정책(미국 사이버 EO, EU AI Act, 각국 AI 안전 법안, 국제 표준) [20%]
+4. 파급력·시급성(대규모 취약점, 공급망 공격에 대한 즉각적 경고) [15%]
+
+[제외/중복 규칙]
+- 아래 '이미 게시된 제목'과 동일한 사건은 제외: {json.dumps(recent_titles, ensure_ascii=False)}
+- 동일 사건을 다룬 후보가 여럿이면 정보가치가 가장 높은 1개만 선정하여, 결과적으로 서로 다른 {want}개 사건이 되도록 구성할 것.
+- 한국 매체/한국어 기사는 제외(사전 필터되었으나 재확인).
+
+선정한 후보의 index 번호 {want}개를 정수 배열로만 반환하십시오.
+
+후보 목록:
+{json.dumps(indexed, ensure_ascii=False)}
+"""
+    data = {
+        "model": "sonar-pro",
+        "messages": [
+            {"role": "system", "content": "보안 뉴스 큐레이션 전문가입니다. 반드시 지정된 JSON 스키마로만 답합니다."},
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": 1000,
+        "response_format": {"type": "json_schema", "json_schema": {"schema": _SELECTION_SCHEMA}},
+    }
+    selected = []
+    try:
+        parsed = _parse_lenient(_pplx_chat(data, timeout=120))
+        raw = parsed.get("selected", []) if isinstance(parsed, dict) else parsed
+        seen = set()
+        for idx in (raw or []):
+            try:
+                i = int(idx)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= i < len(news_list) and i not in seen:
+                seen.add(i)
+                selected.append(news_list[i])
+            if len(selected) >= want:
+                break
+    except Exception as e:
+        print(f"  -> 선정 단계 오류: {e}")
+
+    if not selected:
+        print(f"  -> 선정 실패 → 점수순 상위 {want}개로 폴백합니다.")
+        selected = news_list[:want]
+    else:
+        print(f"  -> {len(selected)}개 기사 선정 완료.")
+    return selected
+
+
+# 본문 작성 가이드라인 (기존 프롬프트 품질 기준을 그대로 계승)
+_WRITING_GUIDE = """[작성 가이드라인 - 엄격 준수]
+- [제목]: 실제 뉴스 헤드라인처럼 자연스럽고 임팩트 있는 전략적 제목(60자 이내).
+  - [종결 방식 — 최우선 규칙]
+    - (기본) 제목은 반드시 명사/명사형(체언)으로 종결. 예: ~확보, ~전환, ~돌입, ~착수, ~공개, ~노출, ~비상, ~격화, ~예고.
+    - (허용) 부득이한 경우에만 현재형 동사 종결('~한다', '~밝혀', '~드러나', '~뒤흔들어')을 사용.
+    - [절대 금지] '~함', '~됨', '~하였음', '~라고 함' 등 개조식 보고서체 종결. 헤드라인이 아니라 회의록처럼 읽히므로 절대 사용 금지.
+  - 명사 나열 금지: 딱딱한 명사구 나열을 피하고 주체와 핵심 액션을 문장처럼 배치.
+  - 핵심 정보 전면 배치: 사건의 주체(기업/기관)와 핵심 액션을 제목 앞부분에.
+  - 인용부호 강조: 핵심 키워드·제품명·발언은 작은따옴표('')로 강조. (예: 팔로알토네트웍스 'PAN-OS' 치명적 결함 노출)
+  - 말줄임표 구조화: "[핵심 사실]… [파장/부연]" 형태로 말줄임표(…)를 적극 활용. (예: GPT-5.5·Mythos, 자율 해킹 '인간 전문가급' 도달… 공격·방어 균형 붕괴)
+- [서브 헤드라인]: 파급효과 중심의 한 문장 요약(<h3> 사용).
+- [핵심 내용 요약]: <ul><li> 구조 사용.
+  - [다각적 분석 체계]: 4~5개의 <li> 항목을 다음 비중으로 구성.
+    - ① 핵심 사건/기술 개요(2개): 가장 핵심적인 사건·기술 메커니즘·발표 실체를 육하원칙 기반으로 간결히 요약.
+    - ② 구체적 데이터 및 근거(1개): 기사에 언급된 수치(%), 금액($), 버전, 공격 규모 등 정량 데이터를 반드시 포함.
+    - ③ 전략적 배경 및 파급효과(1~2개): 배경과 산업계/정책 영향 분석.
+  - [정보 밀도]: 각 <li>는 100자 내외로 간결하게. 문장 내 고유명사(기업·기술명·표준 등)를 2개 이상 포함하되 만연체 지양.
+  - [인과관계 서술]: "[실제 발생한 사건/기술 상세] -> [변화된 현상] -> [전략적/정책적 의미]" 순으로 완결.
+  - [추상 표현 지양]: '혁신적', '상당한 영향', '기대됨' 대신 구체적 메커니즘·정책 근거로 서술.
+  - 모든 문장은 '~다', '~하다', '~이다' 등 격식 있는 서술형 어미로 종결.
+  - 출처 번호([1], [web:1] 등) 및 인용 표시는 절대 포함하지 말 것.
+- [전문가 코멘트]: <blockquote> 사용. 정책 담당자를 위한 행동 권고를 포함해 100자 내외.
+- [주요 용어 설명]: 전문가 코멘트 아래에 별도의 <p>로 구성. 형식: <strong>주요 용어:</strong> 용어(의미), 용어(의미)
+- [HTML 태그 속성값]: 반드시 작은따옴표(')를 사용."""
+
+
+_CONTENT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "title": {"type": "string"},
+        "content": {"type": "string"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["title", "content", "tags"],
+}
+
+
+def generate_article(candidate):
+    """[2단계] 선정된 기사 1건에 대해 제목/HTML본문/태그를 구조화 출력으로 생성한다.
+    응답이 작아 잘림이 없고, 한 건이 실패해도 나머지 기사에는 영향이 없다(장애 격리)."""
+    src_url = candidate.get("link", "")
+    prompt = f"""당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'이자 복잡한 기술 이슈를 정책적 가치로 전환하는 '보안 에듀케이터'입니다.
+아래 기사를 웹에서 조사하여, 한국 정부 보안 정책 담당자가 즉각적 의사결정에 활용할 수 있는 분석을 작성하십시오.
+
+[독자 페르소나: 한국 정부 정책 담당자]
+- 기술 디테일보다 "이 변화가 한국 보안 산업 육성과 국가 안보에 어떤 기회·위기인가"를 파악하고자 함.
+- 비전문가도 이해하도록 IT 전문 용어는 정책적 의미로 치환해 서술.
+
+{_WRITING_GUIDE}
+
+[대상 기사]
+- 제목: {candidate.get('title','')}
+- 출처 URL: {src_url}
+
+아래 세 필드를 생성하십시오.
+- title: 위 가이드라인을 따른 전략적 한국어 헤드라인(60자 이내).
+- content: <h3>서브헤드라인</h3><ul><li>…4~5개…</li></ul><blockquote>전문가 코멘트</blockquote><p><strong>주요 용어:</strong> 용어(의미), 용어(의미)</p> 형식의 HTML 문자열. **출처(<a>) 링크 줄은 넣지 마십시오(시스템이 자동으로 추가합니다).**
+- tags: 핵심 키워드 5개.
+"""
+    data = {
+        "model": "sonar-pro",
+        "messages": [
+            {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 지정된 JSON 스키마로만 답합니다."},
+            {"role": "user", "content": prompt},
+        ],
+        "max_tokens": 4000,
+        "response_format": {"type": "json_schema", "json_schema": {"schema": _CONTENT_SCHEMA}},
+    }
+    parsed = _parse_lenient(_pplx_chat(data, timeout=180))
+    if not isinstance(parsed, dict) or not parsed.get("title") or not parsed.get("content"):
+        raise ValueError("본문 생성 결과가 유효하지 않음")
+    title = str(parsed["title"]).strip()
+    body = str(parsed["content"]).strip()
+    tags = [str(t).strip() for t in (parsed.get("tags") or []) if str(t).strip()][:5]
+    # 출처 줄은 정확한 URL로 프로그램에서 부착(모델의 URL 환각 차단)
+    src_name = _source_name_from_url(src_url)
+    body += f"<p>출처: <a href='{src_url}' target='_blank'>{src_name}</a></p>"
+    return {
+        "title": title,
+        "content": body,
+        "tags": tags,
+        "image_url": candidate.get("rss_image") or "",
+        "source_url": src_url,
+    }
+
+
 def analyze_news_with_perplexity(news_list, recent_titles):
-    """Perplexity AI를 사용하여 최상급 품질의 뉴스 분석을 수행합니다."""
+    """[리팩터링] 2단계 파이프라인으로 최상급 품질·고신뢰 뉴스 분석을 수행한다.
+      1단계 select_top_news : 상위 10개 선정(작은 구조화 출력 → 잘림/깨짐 없음)
+      2단계 generate_article: 기사별 본문 생성(작은 응답 → 잘림 없음, 실패는 건별 격리)
+    구조화 출력(json_schema)으로 JSON 무결성을 API가 보장한다."""
+    if not news_list:
+        return []
+    limited_news = news_list[:40]
+    print(f"Perplexity AI 분석 중 ({len(limited_news)}개 후보)...")
+
+    selected = select_top_news(limited_news, recent_titles, want=10)
+    total = len(selected)
+
+    # 2단계는 서로 독립적인 호출이므로 병렬 실행(rate limit 고려 워커 4개).
+    #  - 순서 보존: 인덱스로 결과를 슬롯에 채운 뒤 성공분만 순서대로 수집
+    #  - 장애 격리: 한 건 예외는 해당 슬롯만 None 처리하고 나머지는 정상 진행
+    def _worker(idx, cand):
+        return idx, generate_article(cand)
+
+    slots = [None] * total
+    max_workers = min(4, total) or 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        futures = {ex.submit(_worker, i, c): (i, c) for i, c in enumerate(selected)}
+        done = 0
+        for fut in concurrent.futures.as_completed(futures):
+            i, cand = futures[fut]
+            done += 1
+            label = cand.get("title", "")[:40]
+            try:
+                _, article = fut.result()
+                slots[i] = article
+                print(f"  -> [{done}/{total}] 본문 생성 완료: {article['title'][:30]}")
+            except Exception as e:
+                print(f"  -> [{done}/{total}] 본문 생성 실패(건너뜀): {label} ({e})")
+
+    results = [a for a in slots if a]
+    print(f"최종 {len(results)}개 기사 생성 완료.")
+    return results
+
+
+def _legacy_analyze_unused(news_list, recent_titles):
+    """[비활성 · 참고용 보존] 기존 단일 호출 분석 로직. 현재 호출되지 않음."""
     if not news_list: return []
     limited_news = news_list[:40]
     print(f"Perplexity AI 분석 중 ({len(limited_news)}개 기사 분석)...")

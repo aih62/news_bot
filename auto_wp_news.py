@@ -683,6 +683,10 @@ _SOURCE_NAME_MAP = {
     "scmagazine.com": "SC Media",
     "helpnetsecurity.com": "Help Net Security",
     "infosecurity-magazine.com": "Infosecurity Magazine",
+    "govinsider.asia": "GovInsider",
+    "techpolicy.press": "Tech Policy Press",
+    "aijourn.com": "AI Journal",
+    "techreviewafrica.com": "Tech Review Africa",
 }
 
 

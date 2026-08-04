@@ -11,7 +11,7 @@ import html
 import urllib3
 import io
 from PIL import Image
-from urllib.parse import quote, urljoin, urlparse
+from urllib.parse import quote, urljoin, urlparse, parse_qs, unquote
 from dotenv import load_dotenv
 
 # .env 파일 로드
@@ -87,14 +87,102 @@ def get_image_from_webpage_robustly(url):
         print(f"    Playwright 시작 오류: {e}")
     return None
 
-def resolve_google_url(url):
-    """구글 뉴스 리다이렉트 URL을 실제 기사 URL로 변환합니다."""
-    if "news.google.com" not in url: return url
+def _decode_google_news_url(url, timeout=20):
+    """news.google.com/rss/articles/CBMi... 형식(base64 인코딩)의 URL을
+    구글 내부 batchexecute API로 원문 기사 URL로 디코딩한다. 실패 시 None.
+    (단순 리다이렉트·정규식으로는 풀리지 않는 최신 포맷 전용 해제 경로)"""
     try:
-        with requests.get(url, timeout=5, allow_redirects=True, headers=COMMON_HEADERS, stream=True) as res:
-            return res.url
-    except:
-        return url
+        parsed = urlparse(url)
+        parts = [p for p in parsed.path.split("/") if p]
+        if len(parts) < 2 or parts[-2] not in ("articles", "read"):
+            return None
+        art_id = parts[-1]
+        # 1) 기사 페이지에서 서명(sg)·타임스탬프(ts) 취득
+        r = requests.get(f"https://news.google.com/rss/articles/{art_id}",
+                         headers=COMMON_HEADERS, timeout=timeout, verify=False)
+        m_sg = re.search(r'data-n-a-sg="([^"]+)"', r.text)
+        m_ts = re.search(r'data-n-a-ts="([^"]+)"', r.text)
+        if not (m_sg and m_ts):
+            return None
+        sig, ts = m_sg.group(1), m_ts.group(1)
+        # 2) batchexecute 페이로드 구성 및 호출
+        inner = ('["garturlreq",[["X","X",["X","X"],null,null,1,1,"US:en",null,1,'
+                 'null,null,null,null,null,0,1],"X","X",1,[1,1,1],1,1,null,0,0,null,0],'
+                 '"%s",%s,"%s"]') % (art_id, ts, sig)
+        freq = json.dumps([[["Fbv4je", inner]]])
+        r2 = requests.post(
+            "https://news.google.com/_/DotsSplashUi/data/batchexecute",
+            headers={"Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+                     "User-Agent": COMMON_HEADERS.get("User-Agent", "Mozilla/5.0")},
+            data={"f.req": freq}, timeout=timeout, verify=False)
+        # 3) 응답 파싱: 빈 줄로 구분된 두 번째 청크의 중첩 JSON에서 URL 추출
+        try:
+            arr = json.loads(r2.text.split("\n\n")[1])
+            decoded = json.loads(arr[0][2])[1]
+            if decoded and decoded.startswith("http"):
+                return decoded
+        except Exception:
+            m = re.search(r'garturlres.{0,8}(https?://[^\\"]+)', r2.text)
+            if m:
+                return m.group(1)
+    except Exception as e:
+        print(f"  -> Google 원문 디코딩 실패: {e}")
+    return None
+
+
+def resolve_google_url(url, deep=False):
+    """구글 뉴스 리다이렉트 URL을 실제 기사 URL로 변환합니다.
+    deep=True면 신뢰도 높은 batchexecute 디코더를 우선 시도하고, 실패 시 빠른 방법(쿼리·리다이렉트·정규식)으로 폴백합니다."""
+    if not url or "news.google.com" not in url.lower(): return url
+    # [최우선] deep 모드에서는 batchexecute 디코더가 가장 정확하므로 먼저 시도한다.
+    #  (빠른 정규식 경로는 페이지 내 임의 URL(gstatic 등)을 오탐할 수 있어 후순위로 둔다.)
+    if deep:
+        decoded = _decode_google_news_url(url)
+        if decoded and "news.google.com" not in urlparse(decoded).netloc.lower():
+            return decoded
+    try:
+        parsed = urlparse(url)
+        query_url = parse_qs(parsed.query).get("url", [None])[0]
+        if query_url and "news.google.com" not in query_url:
+            return unquote(query_url)
+        patterns = [
+            r'<link[^>]+rel=["\'][^"\']*canonical[^"\']*["\'][^>]+href=["\']([^"\']+)',
+            r'<meta[^>]+property=["\']og:url["\'][^>]+content=["\']([^"\']+)',
+            r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:url["\']',
+        ]
+        request_urls = [url]
+        # /read/는 RSS용 /rss/articles/ 엔드포인트로 바꾸면 redirect가
+        # 정상 동작하는 경우가 많습니다.
+        if "/read/" in parsed.path:
+            article_id = parsed.path.rsplit("/read/", 1)[1]
+            request_urls.append(f"https://news.google.com/rss/articles/{article_id}?oc=5")
+        for request_url in request_urls:
+            with requests.get(request_url, timeout=15, allow_redirects=True,
+                              headers=COMMON_HEADERS, verify=False) as res:
+                if "news.google.com" not in urlparse(res.url).netloc.lower():
+                    return res.url
+                page = res.text or ""
+            candidates = []
+            for pattern in patterns:
+                candidates.extend(re.findall(pattern, page, re.I))
+            candidates.extend(re.findall(r'https?://[^\s"<>\\]+', html.unescape(page)))
+            # 페이지에서 긁은 URL 중 기사가 아닌 자산·추적·구글 계열 도메인은 제외
+            asset_hosts = ("google.com", "googleusercontent.com", "gstatic.com",
+                           "google-analytics.com", "googletagmanager.com", "googleapis.com",
+                           "schema.org", "w3.org", "youtube.com", "ytimg.com", "doubleclick.net")
+            asset_exts = (".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico", ".woff", ".woff2")
+            for candidate in candidates:
+                candidate = unquote(html.unescape(candidate).replace('\\u0026', '&')).rstrip('.,;)')
+                host = urlparse(candidate).netloc.lower()
+                path_l = urlparse(candidate).path.lower()
+                if (candidate.startswith("http") and host and
+                        "news.google.com" not in host and
+                        not any(a in host for a in asset_hosts) and
+                        not path_l.endswith(asset_exts)):
+                    return candidate
+    except Exception as e:
+        print(f"  -> Google News 원문 URL 해제 실패: {e}")
+    return url
 
 def init_session():
     try:
@@ -371,6 +459,10 @@ def get_rss_news():
                             "link": actual_link,
                             "published": getattr(entry, 'published', time.ctime()),
                             "search_category": category_name,
+                            "source_name": (
+                                source_title if source_title.strip().lower() not in {"google", "google news"}
+                                else _source_name_from_url(actual_link)
+                            ),
                             "rss_image": extract_image(entry)
                         })
                         seen_links.add(actual_link)
@@ -723,6 +815,13 @@ def generate_article(candidate):
     """[2단계] 선정된 기사 1건에 대해 제목/HTML본문/태그를 구조화 출력으로 생성한다.
     응답이 작아 잘림이 없고, 한 건이 실패해도 나머지 기사에는 영향이 없다(장애 격리)."""
     src_url = candidate.get("link", "")
+    # 구글 뉴스 리다이렉트 URL이면 원문 기사 URL로 해제한다.
+    #  → 출처명(매체)·대표 이미지·Perplexity 조사 모두 'Google'이 아닌 원본 기준으로 동작한다.
+    if src_url and "news.google.com" in src_url.lower():
+        resolved = resolve_google_url(src_url, deep=True)
+        if resolved and "news.google.com" not in urlparse(resolved).netloc.lower():
+            print(f"  -> 구글 URL 원문 해제: {_source_name_from_url(resolved)}")
+            src_url = resolved
     prompt = f"""당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'이자 복잡한 기술 이슈를 정책적 가치로 전환하는 '보안 에듀케이터'입니다.
 아래 기사를 웹에서 조사하여, 한국 정부 보안 정책 담당자가 즉각적 의사결정에 활용할 수 있는 분석을 작성하십시오.
 
@@ -764,7 +863,7 @@ def generate_article(candidate):
     body = str(parsed["content"]).strip()
     tags = [str(t).strip() for t in (parsed.get("tags") or []) if str(t).strip()][:5]
     # 출처 줄은 정확한 URL로 프로그램에서 부착(모델의 URL 환각 차단)
-    src_name = _source_name_from_url(src_url)
+    src_name = candidate.get("source_name") or _source_name_from_url(src_url)
     body += f"<p>출처: <a href='{src_url}' target='_blank'>{src_name}</a></p>"
     return {
         "title": title,
@@ -772,6 +871,7 @@ def generate_article(candidate):
         "tags": tags,
         "image_url": candidate.get("rss_image") or "",
         "source_url": src_url,
+        "source_name": src_name,
     }
 
 

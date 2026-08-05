@@ -46,16 +46,27 @@ def get_today_posts():
     return []
 
 def shorten_url(long_url):
-    """URL 단축 서비스를 사용하여 단축 URL을 생성합니다. (API 키 불필요)
-    1. is.gd (기본)
-    2. da.gd (광고 없음, 깔끔한 리다이렉트)
-    3. cleanuri.com (대체제)
+    """URL 단축 서비스로 단축 URL을 생성합니다. (API 키 불필요, 인터스티셜 없는 즉시 리다이렉트 우선)
+    1. TinyURL (즉시 301 리다이렉트, 광고·클릭유도 페이지 없음)
+    2. is.gd (깔끔한 리다이렉트, 일시 장애 대비 폴백)
+    3. v.gd (is.gd 동일 계열 폴백)
+    ※ da.gd는 신규 단축 URL에 클릭 확인 페이지(인터스티셜)를 도입해 제외함.
     """
-    # 1. is.gd 시도
+    # 1. TinyURL 시도 (즉시 리다이렉트, 인터스티셜 없음)
     try:
-        url = "https://is.gd/create.php"
-        params = {"format": "simple", "url": long_url}
-        res = requests.get(url, params=params, timeout=5)
+        res = requests.get("https://tinyurl.com/api-create.php",
+                           params={"url": long_url}, timeout=8)
+        if res.status_code == 200:
+            result = res.text.strip()
+            if result.startswith("http") and "error" not in result.lower():
+                return result
+    except Exception:
+        pass
+
+    # 2. is.gd 시도 (깔끔한 리다이렉트)
+    try:
+        res = requests.get("https://is.gd/create.php",
+                           params={"format": "simple", "url": long_url}, timeout=8)
         if res.status_code == 200:
             result = res.text.strip()
             if result.startswith("http") and "Error" not in result:
@@ -63,25 +74,13 @@ def shorten_url(long_url):
     except Exception:
         pass
 
-    # 2. da.gd 시도 (광고가 없고 리다이렉트가 빠름)
+    # 3. v.gd 시도 (is.gd 동일 계열 폴백)
     try:
-        url = "https://da.gd/shorten"
-        params = {"url": long_url}
-        res = requests.get(url, params=params, timeout=5)
+        res = requests.get("https://v.gd/create.php",
+                           params={"format": "simple", "url": long_url}, timeout=8)
         if res.status_code == 200:
             result = res.text.strip()
-            if result.startswith("http"):
-                return result
-    except Exception:
-        pass
-
-    # 3. cleanuri.com 시도
-    try:
-        url = "https://cleanuri.com/api/v1/shorten"
-        res = requests.post(url, data={"url": long_url}, timeout=5)
-        if res.status_code == 200:
-            result = res.json().get("result_url")
-            if result:
+            if result.startswith("http") and "Error" not in result:
                 return result
     except Exception:
         pass

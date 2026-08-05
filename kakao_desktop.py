@@ -87,6 +87,20 @@ def shorten_url(long_url):
 
     return long_url
 
+
+def wp_shortlink(post):
+    """워드프레스 기본 단축링크(?p=글ID)를 반환합니다.
+    자기 도메인이라 외부 단축 서비스 없이 광고·인터스티셜 없이 항상 즉시(301) 리다이렉트됩니다."""
+    try:
+        from urllib.parse import urlparse
+        u = urlparse(post.get('link', ''))
+        pid = post.get('id')
+        if u.scheme and u.netloc and pid:
+            return f"{u.scheme}://{u.netloc}/?p={pid}"
+    except Exception:
+        pass
+    return post.get('link', '')
+
 def format_message(posts):
     """포스트 리스트를 가독성 좋은 카카오톡 메시지 형식으로 변환합니다."""
     today_str = get_kst_today()
@@ -105,8 +119,8 @@ def format_message(posts):
                 source_text = p.get_text().replace("출처:", "").strip()
                 break
             
-        # URL 단축 적용
-        link = shorten_url(post['link'])
+        # URL 단축: 워드프레스 기본 단축링크(?p=id) 사용 (자기 도메인·광고 없음·즉시 리다이렉트)
+        link = wp_shortlink(post)
         
         # 숫자 + 제목 + 출처
         msg += f"{i}. *{title}* [{source_text}]\n"

@@ -162,11 +162,11 @@ def resolve_google_url(url, deep=False):
                 if "news.google.com" not in urlparse(res.url).netloc.lower():
                     return res.url
                 page = res.text or ""
+            # canonical / og:url 만 신뢰한다. (페이지의 임의 https URL을 긁으면
+            #  Angular 등 프레임워크 링크(예: angular.dev/license)를 원문으로 오인하므로 사용하지 않는다.)
             candidates = []
             for pattern in patterns:
                 candidates.extend(re.findall(pattern, page, re.I))
-            candidates.extend(re.findall(r'https?://[^\s"<>\\]+', html.unescape(page)))
-            # 페이지에서 긁은 URL 중 기사가 아닌 자산·추적·구글 계열 도메인은 제외
             asset_hosts = ("google.com", "googleusercontent.com", "gstatic.com",
                            "google-analytics.com", "googletagmanager.com", "googleapis.com",
                            "schema.org", "w3.org", "youtube.com", "ytimg.com", "doubleclick.net")
@@ -687,6 +687,7 @@ _SOURCE_NAME_MAP = {
     "techpolicy.press": "Tech Policy Press",
     "aijourn.com": "AI Journal",
     "techreviewafrica.com": "Tech Review Africa",
+    "newsbytes.ph": "Newsbytes.PH",
 }
 
 

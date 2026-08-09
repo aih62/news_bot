@@ -361,6 +361,15 @@ def get_rss_news():
     ]
     exclude_sites = " ".join([f"-site:{site}" for site in korean_media_blacklist])
 
+    def extract_summary(entry):
+        """RSS가 제공하는 본문 요약을 보관한다(원문 스크래핑 실패 시 폴백 근거로 사용)."""
+        text = getattr(entry, 'summary', '') or getattr(entry, 'description', '') or ''
+        if 'content' in entry and entry.content:
+            longest = max((c.value for c in entry.content), key=len, default='')
+            if len(longest) > len(text):
+                text = longest
+        return text[:4000]
+
     def extract_image(entry):
         # 1. 미디어 태그 탐색
         if 'media_content' in entry and entry.media_content: return entry.media_content[0]['url']
@@ -415,7 +424,8 @@ def get_rss_news():
                         "link": actual_link,
                         "published": getattr(entry, 'published', time.ctime()),
                         "search_category": f"Expert_{source_name}",
-                        "rss_image": extract_image(entry)
+                        "rss_image": extract_image(entry),
+                        "rss_summary": extract_summary(entry)
                     })
                     seen_links.add(actual_link)
         except: pass
@@ -463,7 +473,8 @@ def get_rss_news():
                                 source_title if source_title.strip().lower() not in {"google", "google news"}
                                 else _source_name_from_url(actual_link)
                             ),
-                            "rss_image": extract_image(entry)
+                            "rss_image": extract_image(entry),
+                            "rss_summary": extract_summary(entry)
                         })
                         seen_links.add(actual_link)
         except: pass
@@ -707,6 +718,67 @@ def _source_name_from_url(url):
     return host or "출처"
 
 
+# 본문 추출 시 제거할 비(非)기사 영역 태그
+_ARTICLE_DROP_TAGS = ["script", "style", "nav", "header", "footer", "aside", "form", "figure", "noscript", "iframe"]
+
+# 구독 유도·쿠키 고지 등 본문이 아닌 상용구(추출 결과에서 제외)
+_BOILERPLATE_PAT = re.compile(
+    r"(subscribe|newsletter|cookie|privacy policy|all rights reserved|sign up|follow us|read more|"
+    r"advertisement|share this|related articles)", re.I
+)
+
+
+def fetch_article_text(url, max_chars=6000, timeout=20):
+    """기사 URL에서 본문 텍스트를 추출한다.
+
+    모델에 제목·URL만 주면 페이월·봇차단 매체에서 웹검색이 실패해 추측성 일반론이 생성된다.
+    실제 원문을 프롬프트에 주입해 수치·고유명사 등 팩트 공급원을 확보하는 것이 목적이다.
+    추출 실패(차단·타임아웃·비HTML)는 예외를 던지지 않고 빈 문자열을 반환하며,
+    이 경우 호출부는 기존처럼 Perplexity 웹검색에만 의존한다."""
+    if not url or not url.startswith("http"):
+        return ""
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return ""
+    try:
+        res = requests.get(url, timeout=timeout, headers=COMMON_HEADERS, verify=False, allow_redirects=True)
+        if res.status_code != 200:
+            return ""
+        if "html" not in res.headers.get("Content-Type", "").lower():
+            return ""
+
+        soup = BeautifulSoup(res.text, "html.parser")
+        for tag in soup(_ARTICLE_DROP_TAGS):
+            tag.decompose()
+
+        # 1순위 <article> → 2순위 <p>를 가장 많이 가진 컨테이너 → 3순위 문서 전체
+        container = soup.find("article")
+        if container is None or len(container.find_all("p")) < 3:
+            best, best_count = None, 0
+            for cand in soup.find_all(["div", "section", "main"]):
+                count = len(cand.find_all("p", recursive=False))
+                if count > best_count:
+                    best, best_count = cand, count
+            container = best if best_count >= 3 else soup
+
+        paras = []
+        for p in container.find_all("p"):
+            text = p.get_text(" ", strip=True)
+            # 40자 미만은 캡션·버튼·꼬리말일 가능성이 높아 버린다
+            if len(text) < 40 or _BOILERPLATE_PAT.search(text):
+                continue
+            paras.append(text)
+
+        body = re.sub(r"\s+", " ", " ".join(paras)).strip()
+        # 본문이라 보기 어려운 분량이면 없는 것으로 간주(잘못된 컨테이너 오검출 방지)
+        if len(body) < 300:
+            return ""
+        return body[:max_chars]
+    except Exception:
+        return ""
+
+
 _SELECTION_SCHEMA = {
     "type": "object",
     "properties": {
@@ -792,10 +864,16 @@ _WRITING_GUIDE = """[작성 가이드라인 - 엄격 준수]
 - [핵심 내용 요약]: <ul><li> 구조 사용.
   - [다각적 분석 체계]: 반드시 정확히 6개의 <li> 항목을 다음 비중으로 구성.
     - ① 핵심 사건/기술 개요(3개): 기사 자체의 핵심 사건·기술 메커니즘·발표 실체를 육하원칙 기반으로 충실히 요약할 것. 기사 본문에 실제로 담긴 사실 위주로 서술하고 추측·확대해석은 배제.
-    - ② 구체적 데이터 및 근거(1개): 기사에 언급된 수치(%), 금액($), 버전, 공격 규모 등 정량 데이터를 반드시 포함.
-    - ③ 전략적 배경 및 파급효과(2개): 배경과 산업계/정책 영향을 분석(전체 6개 중 2개로 제한하여 배경·파급의 과다 서술을 방지).
+    - ② 구체적 데이터 및 근거(1개): 기사에 언급된 실제 숫자(비율 %, 금액 $, 건수, 버전 번호, 공격 규모, 날짜, 벤치마크 점수 등)를 반드시 아라비아 숫자로 2개 이상 포함. 숫자가 없이 "정량적 근거다"라고만 쓰는 것은 불합격이며, 원문에 수치가 부족하면 웹 조사로 관련 통계·규모·시점을 찾아 보완할 것.
+    - ③ 전략적 배경 및 파급효과(2개): 배경과 산업계/정책 영향을 분석(전체 6개 중 2개로 제한하여 배경·파급의 과다 서술을 방지). 반드시 대상 기사의 사건에서 직접 도출할 것이며, 무관한 다른 사건을 근거로 삼지 말 것.
   - [한 문장 — 필수]: 각 <li>는 반드시 마침표(.)가 정확히 1개인 '하나의 문장'으로 작성. 두 문장으로 쪼개지 말고 '~며', '~고', '~해', '~하면서', '~로', '~어' 등 연결어로 이어 하나의 문장으로 완성할 것. (금지 예: "~만든다는 점이다. 공공 문서~" / 허용 예: "~만든다는 점이며, 공공 문서~를 다시 짜야 한다.")
-  - [정보 밀도 — 필수]: 각 <li>는 120자 내외(100~140자, 최대 150자 — 절대 초과 금지)로 간결하게 작성. 반드시 구체적 팩트(고유명사·기술명·표준·수치·버전 등)를 1개 이상 담아 짧아도 정보가 분명하게 할 것. 길이를 채우려 배경을 늘어놓지 말 것.
+  - [정보 밀도 — 필수]: 각 <li>는 150~200자로 작성하여 충분한 정보를 담을 것(150자 미만은 정보 부족으로 간주하여 불합격). 각 항목에 구체적 팩트(고유명사·기업명·기관명·제품/기술명·표준·수치·버전·날짜 등)를 최소 2개 이상 담을 것.
+  - [빈껍데기 금지 — 필수]: 아래와 같은 '내용 없는 문장'은 절대 금지.
+    - 자기지시 표현: "~라는 정량적 근거다", "~이는 기사의 핵심이다", "기사에 따르면 ~라고 전한다"처럼 팩트 대신 팩트가 있다는 사실만 서술하는 문장.
+    - 동어반복: 서브 헤드라인이나 앞선 불릿의 내용을 표현만 바꿔 되풀이하는 문장.
+    - 원문에서 확인되는 구체 사실(누가·언제·무엇을·얼마나)로 반드시 채울 것.
+  - [기사 지칭 금지 — 필수]: 독자는 원문을 읽지 않으므로 "원문은", "기사에는", "같은 기사에서", "기사에 인용된" 등 기사 자체를 가리키는 표현으로 문장을 시작하거나 서술하지 말 것. 사실을 주체(기업·기관·인물)를 주어로 삼아 직접 단언할 것. (금지 예: "기사에는 Flock의 코칭 자료가 담겨 있다." / 허용 예: "Flock의 코칭 자료는 시의원에게 비공개 사전 브리핑을 하도록 지시한다.")
+  - [지시문 노출 금지 — 필수]: 이 지침에 쓰인 표현("150~200자", "최소 2개 숫자", "불릿", "정량 데이터", "가이드라인" 등)을 결과물 문장에 절대 포함하지 말 것. 작성 규칙은 결과물에 드러나서는 안 되며, 독자에게는 완성된 분석문만 보여야 한다.
   - [인과관계 서술]: "[실제 발생한 사건/기술 상세] -> [변화된 현상] -> [전략적/정책적 의미]" 순으로 완결.
   - [추상 표현 지양]: '혁신적', '상당한 영향', '기대됨' 대신 구체적 메커니즘·정책 근거로 서술.
   - 모든 문장은 '~다', '~하다', '~이다' 등 격식 있는 서술형 어미로 종결.
@@ -816,19 +894,44 @@ _CONTENT_SCHEMA = {
 }
 
 
-def generate_article(candidate):
-    """[2단계] 선정된 기사 1건에 대해 제목/HTML본문/태그를 구조화 출력으로 생성한다.
-    응답이 작아 잘림이 없고, 한 건이 실패해도 나머지 기사에는 영향이 없다(장애 격리)."""
-    src_url = candidate.get("link", "")
-    # 구글 뉴스 리다이렉트 URL이면 원문 기사 URL로 해제한다.
-    #  → 출처명(매체)·대표 이미지·Perplexity 조사 모두 'Google'이 아닌 원본 기준으로 동작한다.
-    if src_url and "news.google.com" in src_url.lower():
-        resolved = resolve_google_url(src_url, deep=True)
-        if resolved and "news.google.com" not in urlparse(resolved).netloc.lower():
-            print(f"  -> 구글 URL 원문 해제: {_source_name_from_url(resolved)}")
-            src_url = resolved
-    prompt = f"""당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'이자 복잡한 기술 이슈를 정책적 가치로 전환하는 '보안 에듀케이터'입니다.
-아래 기사를 웹에서 조사하여, 한국 정부 보안 정책 담당자가 즉각적 의사결정에 활용할 수 있는 분석을 작성하십시오.
+# 이 길이 미만이면 원문 전문이 아니라 RSS 발췌로 보고 웹 조사를 함께 지시한다.
+PARTIAL_SOURCE_LEN = 800
+
+
+def _build_article_prompt(candidate, src_url, source_text, retry_feedback=""):
+    """본문 생성용 프롬프트를 조립한다. retry_feedback이 있으면 재생성 지시를 덧붙인다.
+
+    원문 확보 정도에 따라 지시가 달라진다. 전문을 확보했으면 그것을 1차 근거로 못박고,
+    발췌뿐이거나 아예 없으면 같은 사건에 한정한 웹 조사를 함께 요구한다."""
+    if len(source_text) >= PARTIAL_SOURCE_LEN:
+        source_block = f"""[기사 원문 — 아래 사실이 1차 근거이며, 여기 있는 수치·고유명사를 최대한 활용하십시오]
+{source_text}
+"""
+    elif source_text:
+        source_block = f"""[기사 발췌 — 원문 전체를 가져오지 못해 일부만 확보했습니다]
+{source_text}
+
+- 위 발췌만으로는 6개 불릿을 채울 수 없습니다. **반드시 위 출처 URL과 제목을 웹에서 조사해 이 사건의 구체적 사실을 추가 확보한 뒤 작성하십시오.**
+- 조사할 항목: 발표·공개 주체와 시점, 조사 대상과 표본 규모, 구체적 수치와 비율, 등장하는 기업·기관·연구진 이름, 영향 범위, 후속 조치.
+- 단, 조사 범위는 '이 사건' 하나로 한정하며, 다른 사건을 끌어와 분량을 채우지 마십시오.
+- 조사로도 확인되지 않는 사실은 지어내지 말고, 확인된 사실을 더 깊이 서술하십시오.
+"""
+    else:
+        source_block = """[기사 원문]
+- 원문 자동 추출에 실패했습니다. 반드시 위 출처 URL과 제목을 웹에서 조사해 실제 사실을 확보한 뒤 작성하십시오.
+- 조사 범위는 '이 사건' 하나로 한정하며, 다른 사건을 끌어와 분량을 채우지 마십시오.
+- 조사로도 사실이 확인되지 않으면 추측으로 채우지 말고, 확인된 범위의 사실과 도메인 지식으로 정확하게 서술하십시오.
+"""
+
+    retry_block = ""
+    if retry_feedback:
+        retry_block = f"""
+[재작성 요구 — 직전 결과가 아래 사유로 불합격했습니다. 반드시 교정하십시오]
+{retry_feedback}
+"""
+
+    return f"""당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'이자 복잡한 기술 이슈를 정책적 가치로 전환하는 '보안 에듀케이터'입니다.
+아래 기사 원문을 근거로, 한국 정부 보안 정책 담당자가 즉각적 의사결정에 활용할 수 있는 분석을 작성하십시오.
 
 [독자 페르소나: 한국 정부 정책 담당자]
 - 기술 디테일보다 "이 변화가 한국 보안 산업 육성과 국가 안보에 어떤 기회·위기인가"를 파악하고자 함.
@@ -840,30 +943,169 @@ def generate_article(candidate):
 - 제목: {candidate.get('title','')}
 - 출처 URL: {src_url}
 
-[간결·고밀도 지침 — 매우 중요]
+{source_block}
+[서술 지침 — 매우 중요]
 - 각 불릿은 반드시 마침표가 1개인 '하나의 문장'으로 완성하십시오. 두 문장으로 나누지 말고 연결어('~며', '~고', '~해', '~하면서')로 이어 한 문장으로 만드십시오.
-- 각 불릿은 120자 내외(최대 150자)로 짧게 쓰되, 반드시 구체적 팩트(고유명사·제품·기관·수치·버전 등)를 1개 이상 담아 정보 밀도를 유지하십시오.
-- 짧은 길이가 곧 빈약함은 아닙니다. 막연한 표현·중복 설명·불필요한 배경 나열을 제거하고 핵심 사실만 압축하십시오.
-- 웹 검색 정보가 부족하면 도메인 지식으로 핵심 사실을 보완하되, 길이를 억지로 늘리지 말고 간결함을 유지하십시오.
-- 독자는 짧은 시간에 스캔하듯 읽습니다. 한 불릿이 150자를 넘기면 반드시 더 짧게 다듬으십시오.
-
+- 각 불릿은 150~200자로 충분히 서술하고, 구체적 팩트(고유명사·제품·기관·수치·버전 등)를 2개 이상 담으십시오.
+- 원문에 담긴 숫자(금액·비율·건수·버전·날짜·규모)는 버리지 말고 본문에 그대로 옮기십시오. 숫자는 이 분석의 신뢰도를 결정하는 핵심 자산입니다.
+- [단일 사건 원칙 — 최우선 규칙]: 이 글은 위 '대상 기사' 1건의 사건만 다룹니다. 6개 불릿 전부가 그 하나의 사건을 설명해야 하며, 별개의 사건·다른 기사·무관한 통계를 끌어와 섞는 것은 가장 심각한 오류입니다. 마지막 불릿의 '한국에 대한 함의'도 반드시 이 사건에서 도출하십시오.
+- 웹 조사는 오직 '대상 기사에 등장하는 사실'의 확인·보강(해당 기업의 규모, 그 취약점의 CVE 번호, 그 발표의 배경 등)에만 사용하고, 새로운 사건을 가져오는 데 쓰지 마십시오.
+- 분량이 부족하면 다른 사건으로 채우지 말고, 같은 사건의 경위·메커니즘·이해관계자·후속 조치를 더 깊이 파고들어 채우십시오.
+- 팩트 대신 "~라는 정량적 근거다", "~이 기사의 핵심이다" 같은 자기지시 문장으로 분량을 채우는 것은 불합격 사유입니다.
+- 각 불릿은 문법적으로 완결된 한 문장이어야 합니다. 쉼표로 두 절을 잇는 비문("~밝혔다, 이는 ~")을 쓰지 마십시오.
+{retry_block}
 아래 세 필드를 생성하십시오.
 - title: 위 가이드라인을 따른 전략적 한국어 헤드라인(60자 이내).
-- content: <h3>서브헤드라인</h3><ul><li>…6개(사건개요 3·정량데이터 1·배경파급 2), 각 120자 내외…</li></ul><blockquote>전문가 코멘트</blockquote><p><strong>주요 용어:</strong> 용어(의미), 용어(의미)</p> 형식의 HTML 문자열. **출처(<a>) 링크 줄은 넣지 마십시오(시스템이 자동으로 추가합니다).**
+- content: <h3>서브헤드라인</h3><ul><li>…6개(사건개요 3·정량데이터 1·배경파급 2), 각 150~200자…</li></ul><blockquote>전문가 코멘트</blockquote><p><strong>주요 용어:</strong> 용어(의미), 용어(의미)</p> 형식의 HTML 문자열. **출처(<a>) 링크 줄은 넣지 마십시오(시스템이 자동으로 추가합니다).**
 - tags: 핵심 키워드 5개.
 """
-    data = {
-        "model": "sonar-pro",
-        "messages": [
-            {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 지정된 JSON 스키마로만 답합니다."},
-            {"role": "user", "content": prompt},
-        ],
-        "max_tokens": 4000,
-        "response_format": {"type": "json_schema", "json_schema": {"schema": _CONTENT_SCHEMA}},
-    }
-    parsed = _parse_lenient(_pplx_chat(data, timeout=180))
-    if not isinstance(parsed, dict) or not parsed.get("title") or not parsed.get("content"):
-        raise ValueError("본문 생성 결과가 유효하지 않음")
+
+
+# 팩트 없이 분량만 채우는 자기지시 표현(품질 검사에서 불합격 사유)
+#  '핵심 수치인'은 실제 숫자가 없을 때 억지로 수치처럼 포장하는 상투구라 함께 잡는다.
+_HOLLOW_PAT = re.compile(
+    r"(정량적 근거(이)?다|기사의 핵심은|기사에 따르면|보도했다는 점|라고 전한다|"
+    r"시사하는 바가 크다|주목할 필요가 있다|핵심 수치인|정량 지표는)"
+)
+
+# 독자가 원문을 읽지 않는데도 기사·제목을 가리키는 표현(직접 서술로 교체 대상)
+_META_REF_PAT = re.compile(
+    r"(원문은|원문에는|원문에서는|기사에는|기사에서는|기사 발췌|발췌에 따르면|같은 기사에서|"
+    r"기사에 인용된|본 기사|라는 제목|제목처럼|보도한 바에|해당 매체는)"
+)
+
+# 종결어미 뒤에 쉼표로 다음 절을 이어붙인 비문("~밝혔다, 이는 ~")
+_COMMA_SPLICE_PAT = re.compile(r"(했다|밝혔다|이다|였다|었다|된다|한다|졌다|난다|왔다|린다),\s")
+
+# 작성 지침이 결과물에 새어 나온 흔적(명백한 결함이므로 반드시 재생성)
+_RUBRIC_LEAK_PAT = re.compile(
+    r"(150\s*~\s*200\s*자|\d+\s*자 내외|최소 \d+개 숫자|불릿|정량 데이터|가이드라인|"
+    r"작성 지침|육하원칙|서브 헤드라인)"
+)
+
+# 임계값은 실제 게시물 표본으로 보정했다.
+#  - 부실 사례(2026-08-06자): 불릿 81~88자, 합계 512자
+#  - 개선 후 출력: 불릿 113~142자, 합계 769자
+# 두 분포 사이에 문턱을 두어, 정상 품질에는 불필요한 재생성(API 2배 비용)이 걸리지 않게 한다.
+MIN_BULLET_LEN = 105   # 개별 불릿 하한
+MIN_TOTAL_LEN = 700    # 불릿 합계 하한(개별은 통과해도 전체 분량이 얇은 경우를 잡는다)
+MIN_DIGIT_BULLETS = 1  # 아라비아 숫자를 포함해야 하는 불릿의 최소 개수
+
+
+def _inspect_article_quality(body):
+    """생성된 HTML 본문의 정보 밀도를 검사해 불합격 사유 목록을 반환한다.
+
+    반환값이 빈 리스트이면 합격. 사유가 있으면 호출부가 그 문구를 그대로
+    재생성 프롬프트에 넣어 모델에 무엇이 부족했는지 알린다."""
+    reasons = []
+    bullets = [re.sub(r"<[^>]+>", "", b).strip() for b in re.findall(r"<li>(.*?)</li>", body, re.S)]
+
+    if len(bullets) < 6:
+        reasons.append(f"- 불릿이 {len(bullets)}개뿐입니다. 반드시 6개(사건개요 3·정량데이터 1·배경파급 2)를 작성하십시오.")
+
+    short = [b for b in bullets if len(b) < MIN_BULLET_LEN]
+    if short:
+        reasons.append(
+            f"- {len(short)}개 불릿이 {MIN_BULLET_LEN}자 미만으로 정보가 빈약합니다"
+            f"(가장 짧은 것: {len(short[0])}자 \"{short[0][:40]}…\"). 모든 불릿을 150~200자로 채우십시오."
+        )
+
+    total = sum(len(b) for b in bullets)
+    if bullets and total < MIN_TOTAL_LEN:
+        reasons.append(
+            f"- 불릿 전체 분량이 {total}자로 기준({MIN_TOTAL_LEN}자)에 미달합니다. "
+            f"원문의 수치·고유명사·경위를 더 끌어와 각 불릿을 150~200자로 확장하십시오."
+        )
+
+    with_digits = [b for b in bullets if re.search(r"\d", b)]
+    if len(with_digits) < MIN_DIGIT_BULLETS:
+        reasons.append("- 아라비아 숫자가 포함된 불릿이 없습니다. 금액·비율·건수·버전·날짜·규모 중 최소 2개를 실제 숫자로 제시하십시오.")
+
+    hollow = [b for b in bullets if _HOLLOW_PAT.search(b)]
+    if hollow:
+        reasons.append(
+            f"- {len(hollow)}개 불릿이 팩트 대신 자기지시 표현으로 채워져 있습니다"
+            f"(예: \"{hollow[0][:50]}…\"). 해당 문장을 실제 사실로 교체하십시오."
+        )
+
+    meta = [b for b in bullets if _META_REF_PAT.search(b)]
+    if meta:
+        reasons.append(
+            f"- {len(meta)}개 불릿이 '원문은/기사에는' 등 기사 자체를 지칭하는 표현을 씁니다"
+            f"(예: \"{meta[0][:50]}…\"). 기업·기관·인물을 주어로 삼아 사실을 직접 단언하십시오."
+        )
+
+    splice = [b for b in bullets if _COMMA_SPLICE_PAT.search(b)]
+    if splice:
+        reasons.append(
+            f"- {len(splice)}개 불릿이 종결어미 뒤에 쉼표로 절을 이어붙인 비문입니다"
+            f"(예: \"{splice[0][:60]}…\"). '~하며', '~고' 등 연결어미로 자연스럽게 이으십시오."
+        )
+
+    leak = [b for b in bullets if _RUBRIC_LEAK_PAT.search(b)]
+    if leak:
+        reasons.append(
+            f"- {len(leak)}개 불릿에 작성 지침 용어가 그대로 노출됐습니다"
+            f"(예: \"{leak[0][:60]}…\"). 규칙 표현을 삭제하고 기사 내용만 서술하십시오."
+        )
+
+    return reasons
+
+
+def generate_article(candidate):
+    """[2단계] 선정된 기사 1건에 대해 제목/HTML본문/태그를 구조화 출력으로 생성한다.
+    응답이 작아 잘림이 없고, 한 건이 실패해도 나머지 기사에는 영향이 없다(장애 격리).
+
+    원문 본문을 직접 스크래핑해 프롬프트에 주입하고, 생성 결과의 정보 밀도를 검사해
+    미달이면 불합격 사유를 알려 1회 재생성한다."""
+    src_url = candidate.get("link", "")
+    # 구글 뉴스 리다이렉트 URL이면 원문 기사 URL로 해제한다.
+    #  → 출처명(매체)·대표 이미지·Perplexity 조사 모두 'Google'이 아닌 원본 기준으로 동작한다.
+    if src_url and "news.google.com" in src_url.lower():
+        resolved = resolve_google_url(src_url, deep=True)
+        if resolved and "news.google.com" not in urlparse(resolved).netloc.lower():
+            print(f"  -> 구글 URL 원문 해제: {_source_name_from_url(resolved)}")
+            src_url = resolved
+
+    # 원문 본문 확보(실패 시 RSS 요약으로 폴백, 둘 다 없으면 웹검색에만 의존)
+    source_text = fetch_article_text(src_url)
+    if source_text:
+        print(f"  -> 원문 추출 성공({len(source_text)}자): {candidate.get('title','')[:30]}")
+    else:
+        rss_summary = re.sub(r"<[^>]+>", " ", candidate.get("rss_summary", "") or "")
+        source_text = re.sub(r"\s+", " ", rss_summary).strip()[:2000]
+        if source_text:
+            print(f"  -> 원문 추출 실패 → RSS 요약({len(source_text)}자) 사용: {candidate.get('title','')[:30]}")
+        else:
+            print(f"  -> 원문·RSS 요약 모두 없음 → 웹검색 의존: {candidate.get('title','')[:30]}")
+
+    def _call(feedback=""):
+        data = {
+            "model": "sonar-pro",
+            "messages": [
+                {"role": "system", "content": "보안 뉴스 분석 전문가입니다. 반드시 지정된 JSON 스키마로만 답합니다."},
+                {"role": "user", "content": _build_article_prompt(candidate, src_url, source_text, feedback)},
+            ],
+            "max_tokens": 6000,
+            "response_format": {"type": "json_schema", "json_schema": {"schema": _CONTENT_SCHEMA}},
+        }
+        parsed = _parse_lenient(_pplx_chat(data, timeout=180))
+        if not isinstance(parsed, dict) or not parsed.get("title") or not parsed.get("content"):
+            raise ValueError("본문 생성 결과가 유효하지 않음")
+        return parsed
+
+    parsed = _call()
+    reasons = _inspect_article_quality(str(parsed["content"]))
+    if reasons:
+        print(f"  -> 품질 미달로 재생성: {candidate.get('title','')[:30]} ({len(reasons)}개 사유)")
+        try:
+            retried = _call("\n".join(reasons))
+            # 재생성이 더 나빠질 수 있으므로 사유가 줄어든 경우에만 채택
+            if len(_inspect_article_quality(str(retried["content"]))) < len(reasons):
+                parsed = retried
+        except Exception as e:
+            print(f"  -> 재생성 실패, 1차 결과 사용: {e}")
+
     title = str(parsed["title"]).strip()
     body = str(parsed["content"]).strip()
     tags = [str(t).strip() for t in (parsed.get("tags") or []) if str(t).strip()][:5]

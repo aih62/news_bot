@@ -17,6 +17,15 @@ storage_state.json
 temp_source.txt
 podcast_*.wav
 
+# 실행 산출물 (매 실행마다 새로 생성되므로 버전 관리 대상이 아님)
+selected_news.json
+temp_storage.json
+posts_backup_*.json
+regen_*.json
+final_*.json
+debug_*.txt
+market_status_data.csv
+
 # IDE
 .vscode/
 .idea/

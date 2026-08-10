@@ -11,3 +11,4 @@ google-auth-httplib2
 google-auth-oauthlib
 playwright
 playwright-stealth
+pywebpush

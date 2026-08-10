@@ -283,6 +283,11 @@ def get_image_via_microlink(url):
         print(f"  -> Microlink 이미지 추출 실패: {e}")
     return None
 
+# 구글 뉴스 검색어를 이 개수씩 나눠 호출한다. 7개를 넘기면 when:1d가 무시되므로
+# 여유를 두고 6개로 잡는다(실측 근거는 get_rss_news의 검색 구간 주석 참조).
+KEYWORDS_PER_QUERY = 6
+
+
 def calculate_score(entry):
     score = 0
     title = entry['title'].lower()
@@ -313,12 +318,16 @@ def calculate_score(entry):
         'breach': 3, 'cyberattack': 3, 'zero-day': 4, 'cve': 1
     }
 
-    for kw, points in strategic_keywords.items():
-        if kw in title: score += points
-    for kw, points in tech_leaders.items():
-        if kw in title: score += points
-    for kw, points in technical_keywords.items():
-        if kw in title: score += points
+    # 단어 경계로 매칭한다. 부분문자열 매칭이던 시절 'sec'(35점)가 Secretary·second·
+    # sector·prosecutor에, 'national'(25점)이 International에 걸려
+    # "Secretary of State announces second sector review"가 50점을 받았다.
+    def _hit(kw):
+        return re.search(rf"(?<![a-z0-9]){re.escape(kw)}(?![a-z0-9])", title) is not None
+
+    for table in (strategic_keywords, tech_leaders, technical_keywords):
+        for kw, points in table.items():
+            if _hit(kw):
+                score += points
     
     # 24시간 이내 기사라면 동일한 시의성 점수 부여 (중복 제거용)
     score += 10 # 24h freshness base score
@@ -393,6 +402,10 @@ def get_rss_news():
     for source_name, rss_url in direct_feeds.items():
         try:
             feed = feedparser.parse(rss_url)
+            if not feed.entries:
+                # 조용한 실패를 막는다. Threatpost가 약 4년, Schneier가 URL 오류로
+                # 아무것도 내지 않는 상태였는데 except: pass 때문에 드러나지 않았다.
+                print(f"  [피드 비어 있음] {source_name} (HTTP {getattr(feed, 'status', '?')})")
             for entry in feed.entries[:20]:
                 is_recent = False
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
@@ -428,15 +441,26 @@ def get_rss_news():
                         "rss_summary": extract_summary(entry)
                     })
                     seen_links.add(actual_link)
-        except: pass
+        except Exception as e:
+            print(f"  [피드 수집 실패] {source_name}: {e}")
 
     # 구글 뉴스 검색
+    #  [중요] 구글 뉴스는 쿼리가 길어지면 when:1d(기간 한정)를 조용히 무시하고
+    #  관련도순 과거 기사를 반환한다. 실측: 키워드 6개(174자)면 5건 전부 24h 이내였으나
+    #  8개(228자)부터 79건이 오면서 24h 이내가 0건이 되었고, 운영 쿼리(876자)도 0건이었다.
+    #  그 결과 이 수집 경로가 사실상 아무것도 기여하지 못했다(2026-08-10 확인).
+    #  → 카테고리를 KEYWORDS_PER_QUERY개씩 쪼개 짧은 쿼리 여러 번으로 나눠 호출한다.
     for category_name, keywords in search_categories.items():
-        query = " OR ".join([f'"{k}"' if " " in k else k for k in keywords])
-        full_query = f"({query}) -site:co.kr -site:kr {exclude_sites} when:1d"
-        rss_url = f"https://news.google.com/rss/search?q={quote(full_query)}&hl=en-US&gl=US&ceid=US:en"
-        try:
-            feed = feedparser.parse(rss_url)
+        chunks = [keywords[i:i + KEYWORDS_PER_QUERY] for i in range(0, len(keywords), KEYWORDS_PER_QUERY)]
+        for chunk in chunks:
+            query = " OR ".join([f'"{k}"' if " " in k else k for k in chunk])
+            full_query = f"({query}) when:1d"
+            rss_url = f"https://news.google.com/rss/search?q={quote(full_query)}&hl=en-US&gl=US&ceid=US:en"
+            try:
+                feed = feedparser.parse(rss_url)
+            except Exception as e:
+                print(f"  [검색 실패] {category_name}: {e}")
+                continue
             for entry in feed.entries[:15]:
                 is_recent = True
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
@@ -477,7 +501,6 @@ def get_rss_news():
                             "rss_summary": extract_summary(entry)
                         })
                         seen_links.add(actual_link)
-        except: pass
 
     # 모든 기사에 대해 점수 계산
     for entry in all_entries:
@@ -806,15 +829,27 @@ _SELECTION_SCHEMA = {
 
 def select_top_news(news_list, recent_titles, want=10):
     """[1단계] 후보 중 상위 want개의 index만 구조화 출력으로 선정한다.
-    응답이 매우 작아 잘림/깨짐이 없다. 선정 실패 시 점수순 상위 want개로 폴백한다."""
+    적합한 기사가 want개에 못 미치면 개수를 채우지 않고 그만큼만 반환한다."""
     indexed = [
         {"index": i, "title": n.get("title", ""), "source": n.get("search_category", "")}
         for i, n in enumerate(news_list)
     ]
     prompt = f"""당신은 글로벌 보안 인텔리전스 기업의 '수석 분석가'입니다.
-아래 후보 뉴스에서 한국 정부 보안 정책 담당자에게 가장 가치 있는 상위 {want}개를 선정하십시오.
+아래 후보 뉴스에서 한국 정부 보안 정책 담당자에게 가치 있는 기사를 **최대 {want}개까지** 선정하십시오.
 
-[선정 가중치]
+[주제 적합성 — 최우선 관문. 여기서 탈락하면 다른 조건이 아무리 좋아도 제외]
+- 이 매체는 **사이버보안 · ICT · 인공지능(AI)** 세 분야만 다룹니다.
+- 아래에 해당하면 반드시 제외하십시오.
+  · 일반 정치·선거·의회 동향(대선 출마, 정당 내분, 인사청문회, 지역구 판세 등)
+  · 국제 정세·외교·군사·통상 분쟁 중 사이버·기술 쟁점이 아닌 것
+  · 경제·증시·산업 일반, 스포츠, 연예, 사건사고, 기후·재난 그 자체
+  · 언론사 칼럼·사설·에디터 노트 등 뉴스가 아닌 논평
+  · 국가의 일반 개발·행정 성과 홍보(디지털 전환을 표방해도 기술 실체가 없으면 제외)
+- 판별 기준: "이 기사에서 사이버보안·ICT·AI의 구체적 기술·제품·위협·규제·기업 활동이 **주제 자체**인가?"
+  주제가 아니라 배경으로만 언급된다면 제외하십시오.
+- **한국과 엮을 여지가 있다는 이유로 무관한 기사를 선정하지 마십시오.**
+
+[적합한 기사 중 선정 가중치]
 1. 기업 전략·시장 지배력(M&A, 플랫폼 통합, 기술 로드맵): Palo Alto Networks, CrowdStrike, Microsoft, Zscaler, Google Cloud, Anthropic/OpenAI 등 [40%]
 2. AI 보안·미래 기술(에이전틱 AI 위협, AI 안전성 프레임워크, 양자내성암호, 클라우드 네이티브 보안) [25%]
 3. 글로벌 규제·정책(미국 사이버 EO, EU AI Act, 각국 AI 안전 법안, 국제 표준) [20%]
@@ -822,10 +857,15 @@ def select_top_news(news_list, recent_titles, want=10):
 
 [제외/중복 규칙]
 - 아래 '이미 게시된 제목'과 동일한 사건은 제외: {json.dumps(recent_titles, ensure_ascii=False)}
-- 동일 사건을 다룬 후보가 여럿이면 정보가치가 가장 높은 1개만 선정하여, 결과적으로 서로 다른 {want}개 사건이 되도록 구성할 것.
+- 동일 사건을 다룬 후보가 여럿이면 정보가치가 가장 높은 1개만 선정할 것.
 - 한국 매체/한국어 기사는 제외(사전 필터되었으나 재확인).
 
-선정한 후보의 index 번호 {want}개를 정수 배열로만 반환하십시오.
+[개수 규칙 — 매우 중요]
+- {want}개를 채우는 것은 목표가 아닙니다. **적합한 기사가 {want}개보다 적으면 적은 대로 반환하십시오.**
+- 적합한 기사가 3개뿐이면 3개만, 하나도 없으면 빈 배열을 반환하십시오.
+- 개수를 맞추려고 위 '주제 적합성'에서 탈락한 기사를 넣는 것이 가장 심각한 오류입니다.
+
+선정한 후보의 index 번호를 정수 배열로만 반환하십시오.
 
 후보 목록:
 {json.dumps(indexed, ensure_ascii=False)}
@@ -857,9 +897,14 @@ def select_top_news(news_list, recent_titles, want=10):
     except Exception as e:
         print(f"  -> 선정 단계 오류: {e}")
 
+    # 점수순 상위 want개로 채우는 폴백은 두지 않는다.
+    #  calculate_score는 주제 적합성을 보지 않으므로, 후보가 적은 날 그 폴백은
+    #  정치·일반 뉴스를 그대로 통과시킨다(2026-08-10 Axios 사례).
+    #  선정이 비면 그날은 발행하지 않는 편이 무관한 글을 올리는 것보다 낫다.
     if not selected:
-        print(f"  -> 선정 실패 → 점수순 상위 {want}개로 폴백합니다.")
-        selected = news_list[:want]
+        print("  -> 주제에 적합한 기사가 없어 선정 결과가 비었습니다(발행 없음).")
+    elif len(selected) < want:
+        print(f"  -> {len(selected)}개만 선정(요청 {want}개). 적합한 기사가 부족해 개수를 채우지 않습니다.")
     else:
         print(f"  -> {len(selected)}개 기사 선정 완료.")
     return selected

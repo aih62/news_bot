@@ -1,15 +1,18 @@
 {
+  "_comment_direct_feeds": "Axios 일반 피드(api.axios.com/feed)는 미국 정치가 대부분이라 제거함(2026-08-10). 섹션별 피드는 404로 존재하지 않음. Threatpost는 약 4년간 갱신 없어 제거. Schneier는 URL 오류로 0건이던 것을 정정.",
   "direct_feeds": {
     "TheHackerNews": "https://feeds.feedburner.com/TheHackersNews",
     "BleepingComputer": "https://www.bleepingcomputer.com/feed/",
     "DarkReading": "https://www.darkreading.com/rss.xml",
     "KrebsOnSecurity": "https://krebsonsecurity.com/feed/",
-    "SchneierOnSecurity": "https://www.schneier.com/blog/feed/",
-    "Threatpost": "https://threatpost.com/feed/",
+    "SchneierOnSecurity": "https://www.schneier.com/feed/atom/",
     "WiredSecurity": "https://www.wired.com/feed/category/security/latest/rss",
-    "Axios": "https://api.axios.com/feed/",
     "TheDecoder": "https://the-decoder.com/feed/",
-    "SCMedia": "https://www.scworld.com/rss/"
+    "SCMedia": "https://www.scworld.com/rss/",
+    "SecurityWeek": "https://www.securityweek.com/feed/",
+    "TheRecord": "https://therecord.media/feed/",
+    "HelpNetSecurity": "https://www.helpnetsecurity.com/feed/",
+    "InfosecurityMagazine": "https://www.infosecurity-magazine.com/rss/news/"
   },
   "search_categories": {
     "글로벌_보안_전략_및_트렌드": [

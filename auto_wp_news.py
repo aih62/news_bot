@@ -288,6 +288,83 @@ def get_image_via_microlink(url):
 KEYWORDS_PER_QUERY = 6
 
 
+# 이 사이트 후보 대부분에 등장해 '사건'을 식별하지 못하는 단어.
+# 이런 단어가 중복 판정을 좌우하면 서로 다른 사건이 중복으로 묶인다.
+_DEDUP_STOPWORDS = {
+    "the", "and", "for", "with", "from", "that", "this", "has", "have", "its", "into", "onto",
+    "new", "now", "say", "says", "said", "how", "why", "what", "who", "can", "could", "will",
+    "ai", "cyber", "cybersecurity", "security", "secure", "securities", "tech", "technology",
+    "attack", "attacks", "attacker", "attackers", "threat", "threats", "hack", "hackers",
+    "flaw", "flaws", "bug", "bugs", "vulnerability", "vulnerabilities", "exploit", "exploited",
+    "exploits", "patch", "patches", "patched", "fix", "fixes", "fixed", "update", "updates",
+    "launch", "launches", "launched", "unveils", "unveil", "announces", "announced", "releases",
+    "release", "released", "introduces", "adds", "report", "reports", "reveals", "warns",
+    "data", "user", "users", "customer", "customers", "company", "companies", "firm", "firms",
+    "tool", "tools", "platform", "model", "models", "system", "systems", "service", "services",
+    "risk", "risks", "issue", "issues", "news", "market", "global", "million", "billion",
+    # 벤더·기관명은 이 사이트에 상시 등장하며 그 자체로는 사건을 특정하지 못한다.
+    # ('Microsoft'와 'Windows'를 공유한다는 이유로 무관한 두 기사가 묶인 사례가 있었다)
+    "microsoft", "google", "amazon", "apple", "meta", "cisco", "openai", "anthropic",
+    "aws", "azure", "windows", "claude", "chatgpt", "gemini", "cisa", "nist", "nsa",
+}
+
+
+def _dedup_tokens(text):
+    """제목/URL에서 사건 식별용 토큰을 뽑아 (고유명사·식별자, 일반어)로 나눈다.
+
+    'GPT-5.6-Cyber', 'SMA1000', 'CVE-2026-8037'처럼 숫자·하이픈이 섞인 토큰과
+    'Astra', 'SonicWall' 같은 고유명사가 사건을 가장 정확히 식별한다.
+    (기존 로직은 \\w{4,}로 잘라 'GPT-5.6-Cyber'를 버렸고, 소문자로 뭉개
+     고유명사와 일반어를 구분하지 못해 같은 발표를 별개 사건으로 판정했다.)
+
+    URL slug처럼 대소문자 정보가 없는 입력에서는 고유명사를 알 수 없으므로,
+    그 경우 일반어 비교와 식별자 비교에 의존한다."""
+    # 제목과 URL slug를 같은 형태로 정규화한다.
+    #  slug는 하이픈이 단어 구분자이므로 그대로 두면 통째로 한 토큰이 되어 비교가 되지 않는다.
+    norm = re.sub(r"[^a-z0-9]+", "-", str(text).lower()).strip("-")
+
+    # 버전·모델·CVE·KB 번호. 사건 자체를 가리키므로 빈도와 무관하게 강한 신호로 쓴다.
+    #  (여러 매체가 다룰수록 빈도가 올라가는데, 그것이 곧 같은 사건이라는 증거다.
+    #   'gpt-5.6-cyber'와 slug의 'gpt-5-6-cyber'가 같은 형태로 모인다.)
+    #  뒤따르는 단어를 1개로 제한한다. 제한이 없으면 slug 꼬리를 통째로 삼켜
+    #  'gpt-5-6-cyber-to-help-defenders-...'가 하나의 토큰이 되어 비교가 무의미해진다.
+    strong = set(re.findall(r"cve-\d{4}-\d+|kb\d{5,}|[a-z]{2,}(?:-\d+){1,3}(?:-[a-z]{2,})?", norm))
+
+    content = {t for t in norm.split("-")
+               if len(t) >= 3 and not t.isdigit() and t not in _DEDUP_STOPWORDS}
+    return strong, content
+
+
+def _build_distinctive_filter(titles):
+    """후보 전체에서 흔한 토큰을 걸러내는 판별 함수를 만든다.
+
+    말뭉치가 그날의 후보 목록이므로 임계값이 자동으로 보정된다.
+    'Microsoft'가 후보 여럿에 등장하는 날에는 Microsoft가 식별력을 잃어
+    무관한 마이크로소프트 기사끼리 묶이는 일을 막는다."""
+    df = {}
+    for t in titles:
+        _, content = _dedup_tokens(t)
+        for tok in content:
+            df[tok] = df.get(tok, 0) + 1
+    limit = max(2, int(len(titles) * 0.15))
+    return lambda tok: df.get(tok, 0) <= limit
+
+
+def _same_event(tokens_a, tokens_b, is_distinctive):
+    """두 제목이 같은 사건을 다루는지 판정한다."""
+    strong_a, content_a = tokens_a
+    strong_b, content_b = tokens_b
+
+    # 같은 버전·모델·CVE·KB 번호를 다루면 같은 사건이다.
+    if strong_a & strong_b:
+        return True
+
+    # 나머지는 흔한 토큰을 걸러낸 뒤 겹치는 신호가 2개 이상일 때만 같은 사건으로 본다.
+    # (1개만으로 판정하면 'Microsoft'·'Windows'를 공유하는 무관한 기사끼리 묶인다.)
+    shared = {t for t in (content_a & content_b) if is_distinctive(t)}
+    return len(shared) >= 2
+
+
 def calculate_score(entry):
     score = 0
     title = entry['title'].lower()
@@ -337,8 +414,11 @@ def calculate_score(entry):
         
     return score
 
-def get_rss_news():
-    """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다 (최근 24시간 이내)."""
+def get_rss_news(recent_urls=None):
+    """feeds.json에서 직접 RSS 피드와 검색 카테고리를 읽어와 최신 기사 목록을 가져옵니다 (최근 24시간 이내).
+
+    recent_urls를 받으면 이미 게시한 기사의 URL slug에서 사건 토큰을 뽑아,
+    같은 발표를 다른 매체가 보도한 후보를 교차일 기준으로 걸러낸다."""
     print("feeds.json 로드 중...")
     try:
         with open("feeds.json", "r", encoding="utf-8") as f:
@@ -381,8 +461,13 @@ def get_rss_news():
 
     def extract_image(entry):
         # 1. 미디어 태그 탐색
-        if 'media_content' in entry and entry.media_content: return entry.media_content[0]['url']
-        if 'media_thumbnail' in entry and entry.media_thumbnail: return entry.media_thumbnail[0]['url']
+        # 일부 피드(Wired)는 media_content에 url 키가 없어 KeyError로 수집 전체가 중단됐다.
+        if 'media_content' in entry and entry.media_content:
+            u = entry.media_content[0].get('url')
+            if u: return u
+        if 'media_thumbnail' in entry and entry.media_thumbnail:
+            u = entry.media_thumbnail[0].get('url')
+            if u: return u
         
         # 2. 본문(summary, description, content)에서 이미지 태그 탐색
         content = getattr(entry, 'summary', '') + getattr(entry, 'description', '')
@@ -512,30 +597,33 @@ def get_rss_news():
     # 중복 기사 및 매체 쿼터 관리
     final_candidates = []
     source_counts = {}
-    seen_keywords = [] # 중복 기사 방지용
 
-    def is_duplicate(new_title):
-        # 제목의 주요 명사구/단어 3개 이상이 겹치면 중복으로 간주 (간이 로직)
-        words = set(re.findall(r'\w{4,}', new_title.lower())) # 4글자 이상 단어만 추출
-        for existing_words in seen_keywords:
-            if len(words.intersection(existing_words)) >= 3:
-                return True
-        return False
+    is_distinctive = _build_distinctive_filter([e['title'] for e in all_entries])
+    seen_events = []  # 이미 채택한 사건의 토큰
+
+    # [교차일 중복] 어제 게시한 기사의 원문 URL slug에서 사건 토큰을 뽑아 미리 채워 둔다.
+    #  URL 자체 비교는 매체가 다르면 통과해 버리므로(같은 발표를 THN·SecurityWeek가 각각 보도),
+    #  slug에 담긴 제품명·버전으로 같은 사건임을 알아낸다.
+    for u in (recent_urls or ()):
+        slug = str(u).rstrip("/").split("/")[-1]
+        if slug:
+            seen_events.append(_dedup_tokens(slug))
 
     for entry in all_entries:
         source = entry['search_category']
-        
+
         # 매체별 최대 5개로 완화 (안정적인 10개 확보를 위함)
         if source_counts.get(source, 0) >= 5:
             continue
-            
-        # 중복 기사(내용이 겹치는 다른 매체 기사) 제외
-        if is_duplicate(entry['title']):
+
+        # 같은 사건을 다룬 다른 매체 기사 제외
+        tokens = _dedup_tokens(entry['title'])
+        if any(_same_event(tokens, prev, is_distinctive) for prev in seen_events):
             continue
-        
+
         final_candidates.append(entry)
         source_counts[source] = source_counts.get(source, 0) + 1
-        seen_keywords.append(set(re.findall(r'\w{4,}', entry['title'].lower())))
+        seen_events.append(tokens)
         
         if len(final_candidates) >= 40:
             break
@@ -827,7 +915,7 @@ _SELECTION_SCHEMA = {
 }
 
 
-def select_top_news(news_list, recent_titles, want=10):
+def select_top_news(news_list, recent_titles, want=10, recent_urls=None):
     """[1단계] 후보 중 상위 want개의 index만 구조화 출력으로 선정한다.
     적합한 기사가 want개에 못 미치면 개수를 채우지 않고 그만큼만 반환한다."""
     indexed = [
@@ -857,7 +945,13 @@ def select_top_news(news_list, recent_titles, want=10):
 
 [제외/중복 규칙]
 - 아래 '이미 게시된 제목'과 동일한 사건은 제외: {json.dumps(recent_titles, ensure_ascii=False)}
-- 동일 사건을 다룬 후보가 여럿이면 정보가치가 가장 높은 1개만 선정할 것.
+- 아래는 이미 다룬 기사의 원문 URL입니다. 제목이 한국어로 바뀌어 있어도 이 URL들을 보면 어떤 사건을 이미 보도했는지 알 수 있으니, **같은 사건을 다룬 후보는 매체가 달라도 제외**하십시오.
+  {json.dumps(sorted(recent_urls or [])[:40], ensure_ascii=False)}
+- [같은 사건 1건 원칙 — 반드시 확인]
+  · 여러 매체가 같은 발표·사건을 보도한 경우가 흔합니다. **선정 전에 후보를 사건 단위로 묶고, 각 사건에서 정보가치가 가장 높은 1건만 고르십시오.**
+  · 제목 표현이 달라도 같은 사건입니다. (예: "OpenAI Launches GPT-5.6-Cyber with Exploit Development" / "OpenAI Unveils New Cybersecurity Model GPT-5.6-Cyber" → 같은 발표이므로 1건만)
+  · 같은 제품명·버전·CVE 번호·기관명이 등장하면 같은 사건일 가능성이 높으니 특히 주의하십시오.
+  · Patch Tuesday, 분기 실적, 연례 보고서처럼 매체별 수치가 조금씩 다른 기사도 하나의 사건입니다.
 - 한국 매체/한국어 기사는 제외(사전 필터되었으나 재확인).
 
 [개수 규칙 — 매우 중요]
@@ -1238,7 +1332,7 @@ def generate_article(candidate):
     }
 
 
-def analyze_news_with_perplexity(news_list, recent_titles):
+def analyze_news_with_perplexity(news_list, recent_titles, recent_urls=None):
     """[리팩터링] 2단계 파이프라인으로 최상급 품질·고신뢰 뉴스 분석을 수행한다.
       1단계 select_top_news : 상위 10개 선정(작은 구조화 출력 → 잘림/깨짐 없음)
       2단계 generate_article: 기사별 본문 생성(작은 응답 → 잘림 없음, 실패는 건별 격리)
@@ -1248,7 +1342,7 @@ def analyze_news_with_perplexity(news_list, recent_titles):
     limited_news = news_list[:40]
     print(f"Perplexity AI 분석 중 ({len(limited_news)}개 후보)...")
 
-    selected = select_top_news(limited_news, recent_titles, want=10)
+    selected = select_top_news(limited_news, recent_titles, want=10, recent_urls=recent_urls)
     total = len(selected)
 
     # 2단계는 서로 독립적인 호출이므로 병렬 실행(rate limit 고려 워커 4개).
@@ -1603,7 +1697,7 @@ def main():
     init_session()
     
     recent_titles, recent_urls = get_recent_posts_info()
-    news_list = get_rss_news()
+    news_list = get_rss_news(recent_urls)
 
     # [1차 방어] 이미 게시된 출처 URL을 가진 후보를 AI 분석 전에 사전 제거
     if recent_urls:
@@ -1613,7 +1707,7 @@ def main():
         if removed:
             print(f"  -> 이미 게시된 기사 {removed}개를 후보에서 사전 제외했습니다.")
 
-    selected_news = analyze_news_with_perplexity(news_list, recent_titles)
+    selected_news = analyze_news_with_perplexity(news_list, recent_titles, recent_urls)
 
     if not selected_news:
         print("선정된 뉴스가 없습니다.")

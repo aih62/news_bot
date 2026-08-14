@@ -1345,14 +1345,15 @@ def analyze_news_with_perplexity(news_list, recent_titles, recent_urls=None):
     selected = select_top_news(limited_news, recent_titles, want=10, recent_urls=recent_urls)
     total = len(selected)
 
-    # 2단계는 서로 독립적인 호출이므로 병렬 실행(rate limit 고려 워커 4개).
+    # 2단계는 서로 독립적인 호출이므로 병렬 실행(Perplexity 분당 요청 한도 회피를 위해 워커 2개).
+    #  - 품질 미달 재생성 로직이 호출 수를 늘리므로 동시성을 낮춰 429(Too Many Requests)를 예방
     #  - 순서 보존: 인덱스로 결과를 슬롯에 채운 뒤 성공분만 순서대로 수집
     #  - 장애 격리: 한 건 예외는 해당 슬롯만 None 처리하고 나머지는 정상 진행
     def _worker(idx, cand):
         return idx, generate_article(cand)
 
     slots = [None] * total
-    max_workers = min(4, total) or 1
+    max_workers = min(2, total) or 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {ex.submit(_worker, i, c): (i, c) for i, c in enumerate(selected)}
         done = 0

@@ -34,8 +34,10 @@ if not WP_SITE_URL:
 WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
 # 보장된 기본 이미지 ID (워드프레스 미디어 라이브러리 내 실제 ID)
-GUARANTEED_MEDIA_ID = 5680 
-DEFAULT_IMAGE_URL = "https://ajken.mycafe24.com/wp-content/uploads/2026/05/thedigitalartist-security.jpg"
+#  ※ 기존 5680은 삭제되어 404 → featured_media=0(이미지 없음)으로 폴백되던 문제를 수정.
+#    반드시 미디어 라이브러리에 실제 존재하는 ID를 유지할 것.
+GUARANTEED_MEDIA_ID = 3199
+DEFAULT_IMAGE_URL = "https://ajken.mycafe24.com/wp-content/uploads/2026/03/news_img_1773008245.jpg"
 
 # 공통 헤더
 COMMON_HEADERS = {

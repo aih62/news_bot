@@ -757,12 +757,23 @@ def repair_json_fields(json_str):
 PPLX_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 
 
-def _pplx_chat(data, timeout=180):
-    """Perplexity Chat Completions 호출 후 message content(str)를 반환한다."""
+def _pplx_chat(data, timeout=180, max_retries=4):
+    """Perplexity Chat Completions 호출 후 message content(str)를 반환한다.
+    429(Too Many Requests)·5xx는 지수 백오프로 재시도한다. 품질 재생성이 호출량을 늘려
+    분당 한도를 초과하면 첫 호출이 429로 실패해 기사가 통째로 드롭되던 문제를 방지한다."""
     headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
-    res = requests.post(PPLX_ENDPOINT, headers=headers, json=data, timeout=timeout)
-    res.raise_for_status()
-    return res.json()['choices'][0]['message']['content']
+    delay = 5.0
+    for attempt in range(max_retries + 1):
+        res = requests.post(PPLX_ENDPOINT, headers=headers, json=data, timeout=timeout)
+        if (res.status_code == 429 or res.status_code >= 500) and attempt < max_retries:
+            ra = res.headers.get("Retry-After")
+            wait = float(ra) if (ra and str(ra).strip().isdigit()) else delay
+            print(f"  -> Perplexity {res.status_code} → {wait:.0f}s 후 재시도 ({attempt + 1}/{max_retries})")
+            time.sleep(wait)
+            delay = min(delay * 2, 60)
+            continue
+        res.raise_for_status()
+        return res.json()['choices'][0]['message']['content']
 
 
 def _parse_lenient(content):

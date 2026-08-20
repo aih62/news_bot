@@ -757,10 +757,11 @@ def repair_json_fields(json_str):
 PPLX_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 
 
-def _pplx_chat(data, timeout=180, max_retries=4):
+def _pplx_chat(data, timeout=180, max_retries=6):
     """Perplexity Chat Completions 호출 후 message content(str)를 반환한다.
     429(Too Many Requests)·5xx는 지수 백오프로 재시도한다. 품질 재생성이 호출량을 늘려
-    분당 한도를 초과하면 첫 호출이 429로 실패해 기사가 통째로 드롭되던 문제를 방지한다."""
+    분당 한도를 초과하면 첫 호출이 429로 실패해 기사가 통째로 드롭되던 문제를 방지한다.
+    (재시도 6회, 대기 5→90초까지 증가시켜 rate-limit 버스트를 더 넓게 흡수한다.)"""
     headers = {"Authorization": f"Bearer {PERPLEXITY_API_KEY}", "Content-Type": "application/json"}
     delay = 5.0
     for attempt in range(max_retries + 1):
@@ -770,7 +771,7 @@ def _pplx_chat(data, timeout=180, max_retries=4):
             wait = float(ra) if (ra and str(ra).strip().isdigit()) else delay
             print(f"  -> Perplexity {res.status_code} → {wait:.0f}s 후 재시도 ({attempt + 1}/{max_retries})")
             time.sleep(wait)
-            delay = min(delay * 2, 60)
+            delay = min(delay * 2, 90)
             continue
         res.raise_for_status()
         return res.json()['choices'][0]['message']['content']
@@ -1734,20 +1735,37 @@ def main():
     #  - recent_urls: 과거(교차일) 중복 차단
     #  - posted_this_run: 같은 실행 배치 내에서 AI가 동일 기사를 중복 선정한 경우 차단
     posted_this_run = set()
+    dup_skipped = 0
+    post_ok = 0
+    post_fail = 0
     for news in selected_news:
         norm = normalize_url(news.get('source_url'))
         if norm and norm in recent_urls:
             print(f"  -> [중복 건너뜀] 이미 게시된 기사: {news.get('title')}")
+            dup_skipped += 1
             continue
         if norm and norm in posted_this_run:
             print(f"  -> [중복 건너뜀] 이번 실행에서 중복 선정된 기사: {news.get('title')}")
+            dup_skipped += 1
             continue
         try:
             post_to_wordpress(news, news_list)
             if norm:
                 posted_this_run.add(norm)
+            post_ok += 1
             time.sleep(5)
-        except Exception as e: print(f"처리 중 오류: {e}")
+        except Exception as e:
+            print(f"처리 중 오류: {e}")
+            post_fail += 1
+
+    # [요약] 왜 최종 게시 수가 목표(10)와 다른지 로그에 한눈에 남긴다.
+    generated = len(selected_news)
+    print(
+        f"[요약] 선정 목표 10 → 생성 성공 {generated} "
+        f"(생성 단계 드롭 {10 - generated}) → 중복 탈락 {dup_skipped} → "
+        f"게시 성공 {post_ok}"
+        + (f", 게시 실패 {post_fail}" if post_fail else "")
+    )
 
 if __name__ == "__main__":
     main()

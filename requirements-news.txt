@@ -1,0 +1,10 @@
+# auto_wp_news.py 전용 최소 의존성 (daily_post 워크플로용)
+#  전체 requirements.txt의 notebooklm-py, google-api-*, PyNaCl 등은
+#  auto_wp_news.py가 쓰지 않으므로 제외해 설치 시간·행(hang) 위험을 줄인다.
+requests
+feedparser
+beautifulsoup4
+python-dotenv
+json-repair
+Pillow
+playwright

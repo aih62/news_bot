@@ -306,7 +306,12 @@ def main():
 
     posts = get_today_posts()
     if not posts:
-        print("오늘 올라온 포스팅이 없습니다.")
+        # 당일 게시된 뉴스가 없으면 0건 안내 메시지를 전송한다.
+        today_str = get_kst_today()
+        zero_msg = f"[정보보호 산업 동향 {today_str}]\n\n오늘 게시된 뉴스가 없습니다. (0건)"
+        print("오늘 올라온 포스팅이 없습니다 → 0건 안내 전송")
+        if not send_kakao_memo(zero_msg):
+            sys.exit(1)
         return
 
     message = format_message(posts)

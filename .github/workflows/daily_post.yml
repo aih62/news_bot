@@ -2,8 +2,9 @@ name: Daily Security News Update
 
 on:
   schedule:
-    # 매일 한국 시간 오전 6시 (UTC 21:00)에 실행
-    - cron: '0 21 * * *'
+    # 매일 한국 시간 오전 5시 38분 (UTC 20:38)에 실행
+    #  ※ 정각(:00)은 GitHub cron이 가장 많이 지연·누락시키므로 비정각 분으로 등록
+    - cron: '38 20 * * *'
   workflow_dispatch: # 직접 실행 버튼
 
 jobs:

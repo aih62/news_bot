@@ -2,6 +2,7 @@ import requests
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta, timezone
 from bs4 import BeautifulSoup
 import html
@@ -128,8 +129,48 @@ def format_message(posts):
         
         msg += f"{i}. {title} [{source_text}]\n"
         msg += f"- {link}\n\n"
-        
+
     return msg.strip()
+
+
+def format_messages(posts, max_chars=900):
+    """포스트 리스트를 카카오톡 메시지 여러 건으로 변환합니다.
+    카카오 기본 텍스트 템플릿은 text가 1000자에서 잘리므로, 항목 경계에서
+    안전 한도(max_chars) 이하가 되도록 나눠 담아 URL 잘림을 방지합니다."""
+    today_str = get_kst_today()
+
+    # 항목별 블록 생성
+    blocks = []
+    for i, post in enumerate(posts, 1):
+        title = html.unescape(post['title']['rendered'])
+        soup = BeautifulSoup(post['content']['rendered'], 'html.parser')
+        source_text = "기타"
+        for p in soup.find_all('p'):
+            if '출처:' in p.get_text():
+                source_text = p.get_text().replace("출처:", "").strip()
+                break
+        link = wp_shortlink(post)
+        blocks.append(f"{i}. {title} [{source_text}]\n- {link}")
+
+    def header(part, total):
+        base = f"[정보보호 산업 동향 {today_str}]"
+        return base + (f" ({part}/{total})" if total > 1 else "")
+
+    # 블록을 max_chars 이하 청크로 묶는다(헤더 여유 30자 반영).
+    reserve = 30
+    chunks, cur, cur_len = [], [], reserve
+    for b in blocks:
+        add = len(b) + 2  # 블록 사이 개행 2
+        if cur and cur_len + add > max_chars:
+            chunks.append(cur)
+            cur, cur_len = [], reserve
+        cur.append(b)
+        cur_len += add
+    if cur:
+        chunks.append(cur)
+
+    total = len(chunks)
+    return [header(idx, total) + "\n\n" + "\n\n".join(ch) for idx, ch in enumerate(chunks, 1)]
 
 def save_tokens_to_github_secret(tokens):
     """갱신된 카카오 토큰을 GitHub Actions Secret에 다시 저장합니다.
@@ -231,19 +272,27 @@ def refresh_kakao_token():
         print(f"토큰 갱신 중 예외 발생: {e}")
     return None
 
-def send_kakao_memo(message):
-    """카카오톡 '나에게 보내기' API를 호출합니다."""
-    # 1. 먼저 토큰 갱신 시도
+def _resolve_access_token():
+    """토큰 갱신을 1회 시도하고 액세스 토큰을 반환합니다(실패 시 기존 토큰 폴백)."""
     new_tokens = refresh_kakao_token()
     if not new_tokens:
         print("토큰 갱신에 실패하여 기존 토큰을 사용합니다.")
-        if not KAKAO_TOKEN_JSON: return False
+        if not KAKAO_TOKEN_JSON:
+            return None
         tokens = json.loads(KAKAO_TOKEN_JSON)
     else:
         tokens = new_tokens
-        
-    access_token = tokens.get("access_token")
-    
+    return tokens.get("access_token")
+
+
+def send_kakao_memo(message, access_token=None):
+    """카카오톡 '나에게 보내기' API로 메시지 1건을 전송합니다.
+    access_token을 넘기면 토큰 갱신을 건너뛰고 그대로 사용합니다(분할 전송 시 재갱신 방지)."""
+    if access_token is None:
+        access_token = _resolve_access_token()
+    if not access_token:
+        return False
+
     url = "https://kapi.kakao.com/v2/api/talk/memo/default/send"
     headers = {"Authorization": f"Bearer {access_token}"}
     
@@ -314,13 +363,27 @@ def main():
             sys.exit(1)
         return
 
-    message = format_message(posts)
-    print("--- 생성된 메시지 ---")
-    print(message)
+    # 카카오 텍스트 템플릿 1000자 제한 → 항목 경계에서 여러 메시지로 분할
+    messages = format_messages(posts)
+    print(f"--- 카카오 메시지 {len(messages)}건 분할 전송 ({len(posts)}개 뉴스) ---")
+
+    # 토큰은 1회만 갱신해 모든 분할 메시지에 재사용(회전 토큰 중복 갱신 방지)
+    access_token = _resolve_access_token()
+    if not access_token:
+        print("액세스 토큰 확보 실패")
+        sys.exit(1)
 
     # 전송 실패 시 워크플로를 실패 처리하여 GitHub 알림을 받도록 함
     # (refresh token 만료 등 재인증이 필요한 상황을 놓치지 않기 위함)
-    if not send_kakao_memo(message):
+    all_ok = True
+    for idx, message in enumerate(messages, 1):
+        print(f"--- [{idx}/{len(messages)}] {len(message)}자 ---")
+        print(message)
+        if not send_kakao_memo(message, access_token=access_token):
+            all_ok = False
+        if idx < len(messages):
+            time.sleep(1)
+    if not all_ok:
         sys.exit(1)
 
 if __name__ == "__main__":

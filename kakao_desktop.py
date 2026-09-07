@@ -8,7 +8,6 @@ import requests
 import json
 import os
 from datetime import datetime, timedelta, timezone
-from bs4 import BeautifulSoup
 import html
 from dotenv import load_dotenv
 
@@ -109,21 +108,12 @@ def format_message(posts):
     
     for i, post in enumerate(posts, 1):
         title = html.unescape(post['title']['rendered'])
-        content_html = post['content']['rendered']
-        soup = BeautifulSoup(content_html, 'html.parser')
-        
-        # 출처 추출
-        source_text = "기타"
-        for p in soup.find_all('p'):
-            if '출처:' in p.get_text():
-                source_text = p.get_text().replace("출처:", "").strip()
-                break
-            
+
         # URL 단축: 워드프레스 기본 단축링크(?p=id) 사용 (자기 도메인·광고 없음·즉시 리다이렉트)
         link = wp_shortlink(post)
         
-        # 숫자 + 제목 + 출처
-        msg += f"{i}. *{title}* [{source_text}]\n"
+        # 숫자 + 제목
+        msg += f"{i}. *{title}*\n"
         msg += f"🔗 {link}\n\n"
         
     msg += "━━━━━━━━━━━━━━━━━━━━\n"

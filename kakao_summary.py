@@ -4,7 +4,6 @@ import os
 import sys
 import time
 from datetime import datetime, timedelta, timezone
-from bs4 import BeautifulSoup
 import html
 from dotenv import load_dotenv
 
@@ -114,43 +113,32 @@ def format_message(posts):
     
     for i, post in enumerate(posts, 1):
         title = html.unescape(post['title']['rendered'])
-        content_html = post['content']['rendered']
-        soup = BeautifulSoup(content_html, 'html.parser')
-        
-        # 출처 추출 (p 태그 안의 텍스트)
-        source_text = "기타"
-        for p in soup.find_all('p'):
-            if '출처:' in p.get_text():
-                source_text = p.get_text().replace("출처:", "").strip()
-                break
-            
+
         # URL 단축: 워드프레스 기본 단축링크(?p=id) 사용 (자기 도메인·광고 없음·즉시 리다이렉트)
         link = wp_shortlink(post)
         
-        msg += f"{i}. {title} [{source_text}]\n"
+        msg += f"{i}. {title}\n"
         msg += f"- {link}\n\n"
 
     return msg.strip()
 
 
-def format_messages(posts, max_chars=900):
+def format_messages(posts, max_chars=960):
     """포스트 리스트를 카카오톡 메시지 여러 건으로 변환합니다.
     카카오 기본 텍스트 템플릿은 text가 1000자에서 잘리므로, 항목 경계에서
-    안전 한도(max_chars) 이하가 되도록 나눠 담아 URL 잘림을 방지합니다."""
+    안전 한도(max_chars) 이하가 되도록 나눠 담아 URL 잘림을 방지합니다.
+
+    출처 표기를 빼면서 하루 평균 약 149자를 절감했습니다. 하루 최대 10건
+    (제목 평균 41자) 기준 실측 최대 919자라 평소에는 1건으로 나갑니다.
+    제목이 유난히 긴 날을 대비해 분할 로직은 안전장치로 남겨 둡니다."""
     today_str = get_kst_today()
 
     # 항목별 블록 생성
     blocks = []
     for i, post in enumerate(posts, 1):
         title = html.unescape(post['title']['rendered'])
-        soup = BeautifulSoup(post['content']['rendered'], 'html.parser')
-        source_text = "기타"
-        for p in soup.find_all('p'):
-            if '출처:' in p.get_text():
-                source_text = p.get_text().replace("출처:", "").strip()
-                break
         link = wp_shortlink(post)
-        blocks.append(f"{i}. {title} [{source_text}]\n- {link}")
+        blocks.append(f"{i}. {title}\n- {link}")
 
     def header(part, total):
         base = f"[정보보호 산업 동향 {today_str}]"

@@ -8,6 +8,12 @@ on:
   workflow_run:
     workflows: ["Daily Security News Update"]
     types: [completed]
+  schedule:
+    # 백스톱 안전망: 게시 워크플로 자체가 누락되면 위 체이닝이 발동하지 않아
+    #  알림까지 조용히 침묵한다. 그런 날을 잡아내기 위한 늦은 시각 예약이며,
+    #  당일 이미 성공한 알림이 있으면 아래 guard 스텝이 건너뛴다.
+    #  12:17 KST(03:17 UTC) 예정 — 지연을 감안해도 정상 경로가 끝난 뒤다.
+    - cron: '17 3 * * *'
   workflow_dispatch: # 직접 실행 버튼
     inputs:
       verify_secret_save:
@@ -23,10 +29,31 @@ jobs:
       github.event_name != 'workflow_run' ||
       github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read   # guard 스텝이 당일 알림 실행 이력을 조회하는 데 필요
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
     steps:
+      - name: 오늘 이미 발송했는지 확인 (백스톱 크론 전용)
+        id: guard
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          since=$(TZ=Asia/Seoul date -d 'today 00:00' -u +%Y-%m-%dT%H:%M:%SZ)
+          runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow kakao_notify.yml --limit 50 --json createdAt,conclusion)
+          sent=$(echo "$runs" | jq --arg since "$since" '[.[] | select(.conclusion == "success" and .createdAt >= $since)] | length')
+          echo "KST 자정($since UTC) 이후 성공한 알림 실행: ${sent}건"
+          if [ "${sent:-0}" -gt 0 ]; then
+            echo "오늘 알림이 이미 나갔습니다. 백스톱을 건너뜁니다."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "오늘 알림 기록이 없습니다. 백스톱으로 발송합니다."
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -41,6 +68,8 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run Kakao Notification
+        # guard는 schedule 이벤트에서만 돌며, 그 외 이벤트에서는 출력이 비어 있어 항상 실행된다.
+        if: steps.guard.outputs.skip != 'true'
         env:
           WP_SITE_URL: ${{ secrets.WP_SITE_URL }}
           KAKAO_TOKEN_JSON: ${{ secrets.KAKAO_TOKEN_JSON }}

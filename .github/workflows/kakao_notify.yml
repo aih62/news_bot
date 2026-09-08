@@ -1,10 +1,13 @@
 name: KakaoTalk News Notification
 
 on:
-  schedule:
-    # 매일 한국 시간 오전 7시 21분 (UTC 22:21)에 실행
-    #  (워드프레스 게시(05:38 KST) 이후 실행되어 당일 게시분을 알림)
-    - cron: '21 22 * * *'
+  # 시각 크론 대신 게시 워크플로 완료 직후로 체이닝한다.
+  #  GitHub 예약 실행이 2026-08 말부터 상시 1.5~6시간 지연되어, 07:21 KST 예정이
+  #  실제로는 09시 전후에 돌거나(2026-09-08처럼) 아예 누락됐다. 두 워크플로가
+  #  각각 독립적으로 지연되면 알림이 게시보다 먼저 도는 순서 역전도 발생할 수 있다.
+  workflow_run:
+    workflows: ["Daily Security News Update"]
+    types: [completed]
   workflow_dispatch: # 직접 실행 버튼
     inputs:
       verify_secret_save:
@@ -14,6 +17,11 @@ on:
 
 jobs:
   notify:
+    # 게시가 실패한 날에도 알림은 보낸다(당일 0건 통지가 곧 장애 신호가 된다).
+    # 취소된 실행에만 반응하지 않는다.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion != 'cancelled'
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

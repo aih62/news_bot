@@ -84,7 +84,7 @@ def today_count(k, lesson):
 
 
 def total_words(k):
-    return sum(sum(1 for x in a if x) for a in _learned(k).values())
+    return sum(sum(1 for x in a if x) for a in _learned(k).values() if a)
 
 
 def days_in_week(k, w):

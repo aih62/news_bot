@@ -42,11 +42,25 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          since=$(TZ=Asia/Seoul date -d 'today 00:00' -u +%Y-%m-%dT%H:%M:%SZ)
+          # cutoff는 KST 자정을 UTC로 환산한 값이어야 한다.
+          #  date -u 는 TZ 환경변수를 덮어써 UTC 자정을 주므로 쓰지 않는다. 그 실수로
+          #  23시 UTC(=익일 08시 KST)에 도는 체이닝 실행이 집계에서 빠져, 백스톱이
+          #  2026-09-15~28 내내 아침에 이어 저녁에도 중복 전송했다.
           runs=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow kakao_notify.yml --limit 50 --json createdAt,conclusion)
-          sent=$(echo "$runs" | jq --arg since "$since" '[.[] | select(.conclusion == "success" and .createdAt >= $since)] | length')
+          summary=$(printf '%s' "$runs" | python3 -c 'import datetime as d, json, sys; k=d.timezone(d.timedelta(hours=9)); since=d.datetime.now(k).replace(hour=0,minute=0,second=0,microsecond=0).astimezone(d.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"); rows=json.load(sys.stdin); print(since, sum(1 for r in rows if r.get("conclusion")=="success" and r.get("createdAt","")>=since))')
+          since=${summary% *}
+          sent=${summary##* }
           echo "KST 자정($since UTC) 이후 성공한 알림 실행: ${sent}건"
-          if [ "${sent:-0}" -gt 0 ]; then
+
+          # 조회가 실패했는데 0으로 읽히면 매일 중복 전송한다. 판단 불가면 실패시킨다.
+          case "$sent" in
+            ''|*[!0-9]*)
+              echo "알림 이력 조회 실패(sent='$sent'). 중복 전송을 막기 위해 실패 종료합니다."
+              exit 1
+              ;;
+          esac
+
+          if [ "$sent" -gt 0 ]; then
             echo "오늘 알림이 이미 나갔습니다. 백스톱을 건너뜁니다."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else

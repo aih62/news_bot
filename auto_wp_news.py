@@ -7,6 +7,7 @@ import time
 import calendar
 import concurrent.futures
 import os
+import sys
 import html
 import urllib3
 import io
@@ -757,6 +758,14 @@ def repair_json_fields(json_str):
 PPLX_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 
 
+class PerplexityAuthError(RuntimeError):
+    """Perplexity 인증·쿼터 오류(401/403).
+
+    재시도로 회복되지 않고 사람이 개입해야 하는 오류이므로 별도 타입으로 올린다.
+    2026-09-26~28에 크레딧이 소진되자 401이 일반 예외로 흡수되어, 0건 발행이
+    success로 표시된 채 3일간 아무 경보 없이 방치됐다."""
+
+
 def _pplx_chat(data, timeout=180, max_retries=6):
     """Perplexity Chat Completions 호출 후 message content(str)를 반환한다.
     429(Too Many Requests)·5xx는 지수 백오프로 재시도한다. 품질 재생성이 호출량을 늘려
@@ -766,6 +775,9 @@ def _pplx_chat(data, timeout=180, max_retries=6):
     delay = 5.0
     for attempt in range(max_retries + 1):
         res = requests.post(PPLX_ENDPOINT, headers=headers, json=data, timeout=timeout)
+        if res.status_code in (401, 403):
+            # 재시도 금지: 쿼터 소진·키 폐기는 기다려도 회복되지 않는다.
+            raise PerplexityAuthError(f"Perplexity {res.status_code}: {res.text[:200]}")
         if (res.status_code == 429 or res.status_code >= 500) and attempt < max_retries:
             ra = res.headers.get("Retry-After")
             wait = float(ra) if (ra and str(ra).strip().isdigit()) else delay
@@ -1002,6 +1014,9 @@ def select_top_news(news_list, recent_titles, want=10, recent_urls=None):
                 selected.append(news_list[i])
             if len(selected) >= want:
                 break
+    except PerplexityAuthError:
+        # 인증·쿼터 오류는 여기서 삼키지 않고 상위로 올려 워크플로를 실패시킨다.
+        raise
     except Exception as e:
         print(f"  -> 선정 단계 오류: {e}")
 
@@ -1378,6 +1393,7 @@ def analyze_news_with_perplexity(news_list, recent_titles, recent_urls=None):
         return idx, generate_article(cand)
 
     slots = [None] * total
+    auth_error = None
     max_workers = min(2, total) or 1
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
         futures = {ex.submit(_worker, i, c): (i, c) for i, c in enumerate(selected)}
@@ -1390,8 +1406,15 @@ def analyze_news_with_perplexity(news_list, recent_titles, recent_urls=None):
                 _, article = fut.result()
                 slots[i] = article
                 print(f"  -> [{done}/{total}] 본문 생성 완료: {article['title'][:30]}")
+            except PerplexityAuthError as e:
+                # 인증·쿼터 오류는 남은 건도 전부 실패한다. 건별 격리 대상이 아니다.
+                auth_error = e
+                print(f"  -> [{done}/{total}] 인증/쿼터 오류: {e}")
             except Exception as e:
                 print(f"  -> [{done}/{total}] 본문 생성 실패(건너뜀): {label} ({e})")
+
+    if auth_error:
+        raise auth_error
 
     results = [a for a in slots if a]
     print(f"최종 {len(results)}개 기사 생성 완료.")
@@ -1719,7 +1742,7 @@ def save_selected_news_to_json(selected_news):
 def main():
     if not all([PERPLEXITY_API_KEY, WP_USERNAME, WP_APP_PASSWORD]):
         print("필수 환경 변수 누락")
-        return
+        sys.exit(1)
     init_session()
     
     recent_titles, recent_urls = get_recent_posts_info()
@@ -1733,11 +1756,19 @@ def main():
         if removed:
             print(f"  -> 이미 게시된 기사 {removed}개를 후보에서 사전 제외했습니다.")
 
-    selected_news = analyze_news_with_perplexity(news_list, recent_titles, recent_urls)
+    try:
+        selected_news = analyze_news_with_perplexity(news_list, recent_titles, recent_urls)
+    except PerplexityAuthError as e:
+        # 트레이스백만 남기면 로그에서 원인을 찾기 어렵다. 조치 방법까지 적고 실패시킨다.
+        print(f"[치명] Perplexity 인증/쿼터 오류로 중단합니다: {e}")
+        print("  -> 크레딧 잔액과 API 키를 확인하세요:"
+              " https://console.perplexity.ai/project/billing")
+        sys.exit(1)
 
     if not selected_news:
+        # 0건은 정상 완료가 아니다. 종료 코드를 남겨 워크플로를 실패시킨다.
         print("선정된 뉴스가 없습니다.")
-        return
+        sys.exit(1)
 
     # 뉴스 선정 결과 저장
     save_selected_news_to_json(selected_news)
@@ -1777,6 +1808,12 @@ def main():
         f"게시 성공 {post_ok}"
         + (f", 게시 실패 {post_fail}" if post_fail else "")
     )
+
+    # 한 건도 올리지 못했다면 success로 끝내지 않는다. 뉴스가 없는 날과
+    # 파이프라인이 깨진 날을 워크플로 결과만으로 구분할 수 있어야 한다.
+    if post_ok == 0:
+        print("게시 성공 0건 → 실패로 종료합니다.")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

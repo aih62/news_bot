@@ -346,6 +346,16 @@ def main():
         # 당일 게시된 뉴스가 없으면 0건 안내 메시지를 전송한다.
         today_str = get_kst_today()
         zero_msg = f"[정보보호 산업 동향 {today_str}]\n\n오늘 게시된 뉴스가 없습니다. (0건)"
+
+        # 적합한 기사가 없어 0건인 날과 파이프라인이 깨져 0건인 날은 전혀 다른 상황이다.
+        # 트리거한 게시 실행의 결과를 함께 실어 수신자가 즉시 구분할 수 있게 한다.
+        conclusion = (os.getenv("PUBLISH_CONCLUSION") or "").strip()
+        if conclusion and conclusion != "success":
+            zero_msg += f"\n\n※ 게시 워크플로가 '{conclusion}'로 끝났습니다. 점검이 필요합니다."
+            run_url = (os.getenv("PUBLISH_RUN_URL") or "").strip()
+            if run_url:
+                zero_msg += f"\n{run_url}"
+
         print("오늘 올라온 포스팅이 없습니다 → 0건 안내 전송")
         if not send_kakao_memo(zero_msg):
             sys.exit(1)

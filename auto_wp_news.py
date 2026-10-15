@@ -368,6 +368,41 @@ def _same_event(tokens_a, tokens_b, is_distinctive):
     return len(shared) >= 2
 
 
+# 매체마다 수치가 달라지는 정례 사건. 토큰 비교로는 잡히지 않아 서명으로 식별한다.
+#  (2026-10-15: 같은 Patch Tuesday를 다룬 3건이 1,400 / 1,411 / 1,413으로 수치가
+#   갈려 strong 토큰이 전부 달라지고, 식별 단어인 microsoft·patch·flaws는 모두
+#   _DEDUP_STOPWORDS에 있어 공통 토큰이 'record' 하나뿐이었다. 선정 프롬프트에
+#   'Patch Tuesday'가 이름까지 적혀 있었는데도 3건이 통과했으므로, LLM 판단이 아니라
+#   결정론적 차단이 필요하다.)
+#  서명은 한 가지 사건 유형을 가리킬 뿐이므로, 같은 서명이 둘 이상 나왔을 때만
+#  뒤의 것을 버린다. 혼자 걸린 서명은 아무것도 떨어뜨리지 않아 오탐 비용이 낮다.
+_RECURRING_EVENT_RULES = [
+    # (서명, 제목에 모두 있어야 하는 패턴)
+    ("ms-patch-tuesday", [r"\bpatch tuesday\b"]),
+    ("ms-patch-tuesday", [r"\bmicrosoft\b", r"\bpatch\w*\b", r"\b\d{2,4}\b",
+                          r"\b(cve|cves|flaw|flaws|vulnerabilit\w+)\b"]),
+    ("android-bulletin", [r"\bandroid\b", r"\bsecurity (bulletin|update|patch)\b"]),
+    ("oracle-cpu",       [r"\boracle\b", r"\bcritical patch update\b"]),
+    ("sap-patch-day",    [r"\bsap\b", r"\b(patch day|security notes?)\b"]),
+    ("chrome-stable",    [r"\bchrome\b", r"\bstable (channel )?update\b"]),
+]
+
+
+def _recurring_signature(text):
+    """정례 사건의 서명을 반환한다(해당 없으면 None).
+
+    제목과 URL slug 모두에 쓰이므로 하이픈·쉼표를 공백으로 normalize한 뒤 본다.
+    '1,400'은 '1 400'이 되므로 다시 붙여 수치로 인식시키고, CVE 식별자의 연도가
+    수치로 오인되지 않도록 먼저 제거한다."""
+    t = re.sub(r"[^a-z0-9]+", " ", str(text).lower())
+    t = re.sub(r"\bcve \d{4} \d+\b", " cve ", t)      # CVE 연도를 수치로 세지 않는다
+    t = re.sub(r"(?<=\b\d) (?=\d{3}\b)", "", t)        # '1 400' -> '1400'
+    for key, patterns in _RECURRING_EVENT_RULES:
+        if all(re.search(p, t) for p in patterns):
+            return key
+    return None
+
+
 def calculate_score(entry):
     score = 0
     title = entry['title'].lower()
@@ -607,10 +642,15 @@ def get_rss_news(recent_urls=None):
     # [교차일 중복] 어제 게시한 기사의 원문 URL slug에서 사건 토큰을 뽑아 미리 채워 둔다.
     #  URL 자체 비교는 매체가 다르면 통과해 버리므로(같은 발표를 THN·SecurityWeek가 각각 보도),
     #  slug에 담긴 제품명·버전으로 같은 사건임을 알아낸다.
+    seen_signatures = set()  # 이미 채택한 정례 사건의 서명
+
     for u in (recent_urls or ()):
         slug = str(u).rstrip("/").split("/")[-1]
         if slug:
             seen_events.append(_dedup_tokens(slug))
+            sig = _recurring_signature(slug)
+            if sig:
+                seen_signatures.add(sig)
 
     for entry in all_entries:
         source = entry['search_category']
@@ -624,9 +664,18 @@ def get_rss_news(recent_urls=None):
         if any(_same_event(tokens, prev, is_distinctive) for prev in seen_events):
             continue
 
+        # 정례 사건은 매체별 수치가 갈려 토큰 비교로 잡히지 않으므로 서명으로 1건만 통과시킨다.
+        #  all_entries가 점수 내림차순이라 가장 높은 점수의 기사가 남는다.
+        signature = _recurring_signature(entry['title'])
+        if signature and signature in seen_signatures:
+            print(f"  -> [정례 중복 제외] {signature}: {entry['title'][:60]}")
+            continue
+
         final_candidates.append(entry)
         source_counts[source] = source_counts.get(source, 0) + 1
         seen_events.append(tokens)
+        if signature:
+            seen_signatures.add(signature)
         
         if len(final_candidates) >= 40:
             break

@@ -1,13 +1,24 @@
 name: Podcast News Notification
 
 on:
-  schedule:
-    # 매일 한국 시간 오전 8시 5분 (UTC 전날 23:05)에 실행 (kakao_notify 직후)
-    - cron: '5 23 * * *'
+  # 고정 크론 대신 게시 워크플로 완료 직후로 체이닝한다.
+  #  크론 '5 23 * * *'(08:05 KST 예정)은 GitHub 지연으로 게시가 끝나기도 전에
+  #  돌 수 있었고, 게시 시각 자체가 지연에 따라 08~11시로 흔들렸다.
+  #  체이닝하면 게시가 몇 시에 끝나든 그 직후에 시작한다.
+  #  kakao_notify와 같은 트리거를 쓰므로 둘은 병렬로 돈다(팟캐스트 생성이
+  #  40분 넘게 걸리는데 그만큼 카카오 알림을 늦출 이유가 없다).
+  workflow_run:
+    workflows: ["Daily Security News Update"]
+    types: [completed]
   workflow_dispatch: # 직접 실행 버튼
 
 jobs:
   generate_podcast:
+    # 게시가 실패한 날은 만들 재료가 없으므로 성공한 경우만 진행한다.
+    #  (0건 통지가 의미 있는 kakao_notify와 달리, 팟캐스트는 내용이 없으면 무의미)
+    if: >-
+      github.event_name != 'workflow_run' ||
+      github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     env:
       FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true

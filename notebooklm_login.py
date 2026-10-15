@@ -33,12 +33,53 @@ def save_storage_state_from_env():
     return False
 
 
+async def verify_session():
+    """복원한 쿠키로 NotebookLM에 실제로 접근되는지 확인한다.
+
+    기존에는 세션 파일을 쓰기만 하고 유효성을 보지 않아, 만료된 쿠키로도 이 단계가
+    '성공'으로 끝나고 한참 뒤 generate_podcast.py 안에서 깨졌다. 그러면 로그만 보고
+    '세션이 만료됐다'는 사실을 알 수 없다. 예약 실행 13회가 전부 실패했는데
+    (2026-03-15~25) 원인을 특정할 수 없었던 이유다."""
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(
+            headless=True,
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+        )
+        try:
+            context = await browser.new_context(
+                storage_state=str(STORAGE_PATH), locale="ko-KR", timezone_id="Asia/Seoul")
+            page = await context.new_page()
+            await Stealth().apply_stealth_async(page)
+            await page.goto(NOTEBOOKLM_URL, wait_until="domcontentloaded", timeout=45000)
+            url = page.url
+            if "accounts.google.com" in url or "signin" in url.lower():
+                print("[세션 만료] 복원한 쿠키로는 로그인 상태가 유지되지 않습니다.", flush=True)
+                print(f"  현재 URL: {url}", flush=True)
+                print("  -> 로컬에서 run_podcast_local.py 를 실행해 세션을 새로 만든 뒤,", flush=True)
+                print("     ~/.notebooklm/storage_state.json 내용을 저장소 Secret", flush=True)
+                print("     NOTEBOOKLM_STORAGE_STATE 에 다시 넣어 주세요.", flush=True)
+                return False
+            print(f"세션 유효 확인됨 (URL: {url})", flush=True)
+            return True
+        except Exception as e:
+            print(f"[세션 검증 실패] {e}", flush=True)
+            return False
+        finally:
+            await browser.close()
+
+
 async def login_to_notebooklm():
     state_restored = save_storage_state_from_env()
-    
+
     if state_restored or STORAGE_PATH.exists():
-        print("기존 세션 정보(storage_state.json)가 존재합니다. 브라우저 자동 로그인을 건너뜁니다.", flush=True)
-        return
+        print("기존 세션 정보(storage_state.json)가 존재합니다. 유효성을 확인합니다.", flush=True)
+        if await verify_session():
+            return
+        if not GOOGLE_PASSWORD:
+            print("오류: 세션이 만료됐고 GOOGLE_PASSWORD도 없습니다. 중단합니다.", flush=True)
+            sys.exit(1)
+        print("세션이 만료돼 비밀번호 로그인을 시도합니다.", flush=True)
+        print("  ※ 데이터센터 IP에서는 구글이 CAPTCHA·2단계 인증을 요구할 수 있습니다.", flush=True)
 
     if not GOOGLE_PASSWORD:
         print("오류: GOOGLE_PASSWORD 환경변수가 설정되지 않았으며 유효한 세션도 없습니다.", flush=True)

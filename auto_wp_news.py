@@ -416,6 +416,11 @@ def calculate_score(entry):
         'ai safety': 45, 'ai governance': 40, 'quantum-safe': 35,
         'compliance': 25, 'directive': 25, 'legislation': 35,
         'mythos': 45, 'glasswing': 45, 'red teaming': 35,
+        # AI가 보안 산업을 바꾸는 각도. 기존 표에는 기술 주제어만 있어
+        #  "벤더가 AI로 탐지력을 바꿨다"류 기사가 가점을 받지 못했다.
+        'ai-powered': 40, 'ai-driven': 40, 'ai-assisted': 35,
+        'agentic soc': 45, 'weaponized ai': 40, 'autonomous hacking': 45,
+        'frontier model': 45, 'shadow ai': 40, 'ai security': 35, 'copilot': 30,
         'agentic': 45, 'autonomous': 40, 'covert': 35, 'botnet': 30,
         'soho': 25, 'nsa': 30, 'advisory': 25, 'state-level': 30
     }
@@ -987,9 +992,19 @@ def select_top_news(news_list, recent_titles, want=10, recent_urls=None):
 
 [선정 구성 — 비율 가중치가 아니라 반드시 지킬 건수 쿼터]
 1. 기업 전략·시장 지배력(M&A, 투자·실적, 플랫폼 통합, 기술 로드맵): Palo Alto Networks, CrowdStrike, Microsoft, Zscaler, Google Cloud, Anthropic/OpenAI 등 → **4건**
-2. AI 보안·미래 기술(에이전틱 AI 위협, AI 안전성 프레임워크, 양자내성암호, 클라우드 네이티브 보안) → **3건**
+2. AI가 보안 산업을 바꾸는 방식 → **3건**
+   · 벤더가 AI를 제품에 넣어 탐지·대응 역량이 실제로 달라진 사례 (예: 특정 기업이 자사 플랫폼에 AI를 도입해 탐지력을 개선)
+   · 프런티어 모델의 보안 역량 변화 (예: 최신 모델의 취약점 발견·공격 수행 능력이 크게 올라감)
+   · 공격자의 AI 활용으로 공격 속도·규모·정교함이 달라진 사례 (예: AI 도구를 써서 특정 기업·기관을 침해)
+   · AI가 보안 인력·지출·경쟁 구도에 주는 구조적 영향
+   · 에이전틱 AI 위협, AI 안전성 프레임워크, 양자내성암호 등 미래 기술 의제
+   판별 기준: "이 기사를 읽고 보안 산업이 어느 방향으로 바뀌는지 알 수 있는가
 3. 글로벌 규제·정책(미국 사이버 EO, EU AI Act, 각국 AI 안전 법안, 국제 표준) → **2건**
-4. 파급력·시급성(대규모 취약점, 공급망 공격에 대한 즉각적 경고) → **1건 (최대 1건, 초과 절대 금지)**
+4. 파급력·시급성 → **1건 (최대 1건, 초과 절대 금지)**
+   - [제외 — 중요] 취약점의 발견·공개·패치 배포·KEV 등재 그 자체는 선정하지 마십시오. 기술적 사실일 뿐 산업이 어떻게 바뀌는지 말해주지 않습니다.
+     (제외 예: "Cisco, 핵심 취약점 12건 패치" / "CISA, Ivanti 결함을 KEV에 등재" / "SonicWall SMA1000 취약점 공개" / "Fortra, BoKS 치명적 취약점 패치")
+   - [포함] 그 사건이 산업의 대응 방식이나 전제를 바꾼 경우만 선정하십시오.
+     (포함 예: "패치 5개월 뒤에도 랜섬웨어 표적 — 패치 중심 대응의 한계" / "공급망 한 지점 침해로 23개국 항만 운영사가 동시 노출")
 
 - [4번 상한이 가장 중요합니다] 개별 취약점·패치·침해 사고 기사가 후보에 아무리 많아도
   그중 파급력이 가장 큰 **1건만** 고르고 나머지는 전부 버리십시오. 후보의 절반이

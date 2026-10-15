@@ -461,7 +461,17 @@ def get_rss_news(recent_urls=None):
     try:
         with open("feeds.json", "r", encoding="utf-8") as f:
             config = json.load(f)
-            direct_feeds = config.get("direct_feeds", {})
+            vuln_feeds = config.get("vuln_feeds", {})
+            industry_feeds = config.get("industry_feeds", {})
+            # 과거 형식(direct_feeds 단일 묶음) 호환. 성격을 알 수 없으므로
+            # 보수적으로 취약점군 쿼터를 적용한다.
+            legacy_feeds = config.get("direct_feeds", {})
+            direct_feeds = {**legacy_feeds, **vuln_feeds, **industry_feeds}
+            # 출처 라벨(Expert_*)별 쿼터. search_category 라벨 자체는 바꾸지 않아
+            # 점수 보너스와 선정 프롬프트의 source 표기가 그대로 유지된다.
+            feed_quota = {f"Expert_{n}": VULN_FEED_QUOTA for n in legacy_feeds}
+            feed_quota.update({f"Expert_{n}": VULN_FEED_QUOTA for n in vuln_feeds})
+            feed_quota.update({f"Expert_{n}": INDUSTRY_FEED_QUOTA for n in industry_feeds})
             search_categories = config.get("search_categories", {})
     except Exception as e:
         print(f"feeds.json 로드 실패: {e}")
@@ -655,8 +665,9 @@ def get_rss_news(recent_urls=None):
     for entry in all_entries:
         source = entry['search_category']
 
-        # 매체별 최대 5개로 완화 (안정적인 10개 확보를 위함)
-        if source_counts.get(source, 0) >= 5:
+        # 출처 성격별 쿼터를 적용한다(상수 주석 참조). 검색 카테고리는 매핑에 없다.
+        quota = feed_quota.get(source, SEARCH_CATEGORY_QUOTA)
+        if source_counts.get(source, 0) >= quota:
             continue
 
         # 같은 사건을 다룬 다른 매체 기사 제외
@@ -689,6 +700,15 @@ def get_rss_news(recent_urls=None):
 #   - 구조화 출력(json_schema)으로 API가 JSON 무결성을 보장 → 따옴표 깨짐 원천 차단
 #   - 응답을 잘게 나눠 truncation(잘림) 원천 차단, 실패는 건별로 격리
 # ══════════════════════════════════════════════════════════════════════
+# 출처 성격별 후보 쿼터. 일률 쿼터로는 CVE 밀착 매체를 누를 때 산업 동향 매체도
+#  같이 눌려, '취약점 축소'와 '산업 동향 확대'를 동시에 달성할 수 없었다.
+#  (2026-10-15 실측: 일률 5건 시절 후보 40건 중 직접 피드 24건에 기업전략 0건·
+#   취약점 13건. 일률 3건으로 낮췄을 때는 취약점이 8%로 떨어졌지만 같은 쿼터에
+#   묶인 MSSPAlert·TheDecoder 같은 산업 매체도 3건에 갇혔다.)
+VULN_FEED_QUOTA = 2        # CVE·CWE·패치·침해 보도 중심 매체
+INDUSTRY_FEED_QUOTA = 6    # 보안산업 동향·정책·AI보안 매체
+SEARCH_CATEGORY_QUOTA = 8  # 전략·정책·시장 검색 카테고리
+
 PPLX_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 
 
@@ -897,11 +917,18 @@ def select_top_news(news_list, recent_titles, want=10, recent_urls=None):
   주제가 아니라 배경으로만 언급된다면 제외하십시오.
 - **한국과 엮을 여지가 있다는 이유로 무관한 기사를 선정하지 마십시오.**
 
-[적합한 기사 중 선정 가중치]
-1. 기업 전략·시장 지배력(M&A, 플랫폼 통합, 기술 로드맵): Palo Alto Networks, CrowdStrike, Microsoft, Zscaler, Google Cloud, Anthropic/OpenAI 등 [40%]
-2. AI 보안·미래 기술(에이전틱 AI 위협, AI 안전성 프레임워크, 양자내성암호, 클라우드 네이티브 보안) [25%]
-3. 글로벌 규제·정책(미국 사이버 EO, EU AI Act, 각국 AI 안전 법안, 국제 표준) [20%]
-4. 파급력·시급성(대규모 취약점, 공급망 공격에 대한 즉각적 경고) [15%]
+[선정 구성 — 비율 가중치가 아니라 반드시 지킬 건수 쿼터]
+1. 기업 전략·시장 지배력(M&A, 투자·실적, 플랫폼 통합, 기술 로드맵): Palo Alto Networks, CrowdStrike, Microsoft, Zscaler, Google Cloud, Anthropic/OpenAI 등 → **4건**
+2. AI 보안·미래 기술(에이전틱 AI 위협, AI 안전성 프레임워크, 양자내성암호, 클라우드 네이티브 보안) → **3건**
+3. 글로벌 규제·정책(미국 사이버 EO, EU AI Act, 각국 AI 안전 법안, 국제 표준) → **2건**
+4. 파급력·시급성(대규모 취약점, 공급망 공격에 대한 즉각적 경고) → **1건 (최대 1건, 초과 절대 금지)**
+
+- [4번 상한이 가장 중요합니다] 개별 취약점·패치·침해 사고 기사가 후보에 아무리 많아도
+  그중 파급력이 가장 큰 **1건만** 고르고 나머지는 전부 버리십시오. 후보의 절반이
+  취약점 기사인 날이 많은데, 그것은 매체 구성 탓이며 선정 비중의 근거가 아닙니다.
+- 특정 범주에 적합한 기사가 쿼터보다 적으면 그 범주는 적은 대로 두고, **다른 범주
+  기사로 메우지 마십시오.** 특히 빈자리를 4번으로 채우는 것이 가장 심각한 오류입니다.
+- 쿼터를 합쳐 10건이 안 되는 것은 정상입니다. 쿼터를 넘기는 것이 더 나쁩니다.
 
 [제외/중복 규칙]
 - 아래 '이미 게시된 제목'과 동일한 사건은 제외: {json.dumps(recent_titles, ensure_ascii=False)}

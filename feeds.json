@@ -1,50 +1,122 @@
 {
   "_comment_direct_feeds": "Axios 일반 피드(api.axios.com/feed)는 미국 정치가 대부분이라 제거함(2026-08-10). 섹션별 피드는 404로 존재하지 않음. Threatpost는 약 4년간 갱신 없어 제거. Schneier는 URL 오류로 0건이던 것을 정정.",
-  "direct_feeds": {
+  "vuln_feeds": {
     "TheHackerNews": "https://feeds.feedburner.com/TheHackersNews",
     "BleepingComputer": "https://www.bleepingcomputer.com/feed/",
     "DarkReading": "https://www.darkreading.com/rss.xml",
     "KrebsOnSecurity": "https://krebsonsecurity.com/feed/",
-    "SchneierOnSecurity": "https://www.schneier.com/feed/atom/",
-    "WiredSecurity": "https://www.wired.com/feed/category/security/latest/rss",
-    "TheDecoder": "https://the-decoder.com/feed/",
-    "SCMedia": "https://www.scworld.com/rss/",
     "SecurityWeek": "https://www.securityweek.com/feed/",
     "TheRecord": "https://therecord.media/feed/",
     "HelpNetSecurity": "https://www.helpnetsecurity.com/feed/",
-    "InfosecurityMagazine": "https://www.infosecurity-magazine.com/rss/news/"
+    "InfosecurityMagazine": "https://www.infosecurity-magazine.com/rss/news/",
+    "SCMedia": "https://www.scworld.com/rss/"
+  },
+  "industry_feeds": {
+    "TheDecoder": "https://the-decoder.com/feed/",
+    "SchneierOnSecurity": "https://www.schneier.com/feed/atom/",
+    "WiredSecurity": "https://www.wired.com/feed/category/security/latest/rss",
+    "MSSPAlert": "https://www.msspalert.com/feed",
+    "IndustrialCyber": "https://industrialcyber.co/feed/",
+    "CyberScoop": "https://cyberscoop.com/feed/",
+    "Nextgov": "https://www.nextgov.com/rss/all/",
+    "CSOOnline": "https://www.csoonline.com/feed/"
   },
   "search_categories": {
     "글로벌_보안_전략_및_트렌드": [
-      "Cybersecurity Strategy", "Cybersecurity Policy", "Cybersecurity Regulation",
-      "National Cybersecurity", "Cybersecurity Market", "Cybersecurity Investment",
-      "Cybersecurity M&A", "Cybersecurity Trends 2026", "Security Transformation",
-      "National Cybersecurity Strategy 2026", "Agentic AI Security"
+      "Cybersecurity Strategy",
+      "Cybersecurity Policy",
+      "Cybersecurity Regulation",
+      "National Cybersecurity",
+      "Cybersecurity Market",
+      "Cybersecurity Investment",
+      "Cybersecurity M&A",
+      "Cybersecurity Trends 2026",
+      "Security Transformation",
+      "National Cybersecurity Strategy 2026",
+      "Agentic AI Security"
     ],
     "빅테크_및_플랫폼_보안": [
-      "Microsoft Security Strategy", "Google Cloud Security", "Amazon AWS Security",
-      "Palo Alto Networks Platform", "CrowdStrike Falcon", "Big Tech Security Policy",
-      "Enterprise Security Platform", "Security Consolidation", "Autonomous Security Operations"
+      "Microsoft Security Strategy",
+      "Google Cloud Security",
+      "Amazon AWS Security",
+      "Palo Alto Networks Platform",
+      "CrowdStrike Falcon",
+      "Big Tech Security Policy",
+      "Enterprise Security Platform",
+      "Security Consolidation",
+      "Autonomous Security Operations",
+      "Microsoft security roadmap",
+      "Google Cloud security launch",
+      "Cisco security acquisition",
+      "enterprise security product launch",
+      "SIEM consolidation vendor"
     ],
     "AI_및_디지털_거버넌스": [
-      "AI Security Policy", "AI Safety Framework", "Generative AI Risk Management",
-      "Responsible AI", "AI Governance", "NIST AI RMF", "EU AI Act Implementation",
-      "Quantum-Safe Cryptography Strategy", "Anthropic Mythos", "Project Glasswing",
-      "AI Safety Guidelines", "AI red teaming", "Agentic AI threats", "State-level AI legislation",
+      "AI Security Policy",
+      "AI Safety Framework",
+      "Generative AI Risk Management",
+      "Responsible AI",
+      "AI Governance",
+      "NIST AI RMF",
+      "EU AI Act Implementation",
+      "Quantum-Safe Cryptography Strategy",
+      "Anthropic Mythos",
+      "Project Glasswing",
+      "AI Safety Guidelines",
+      "AI red teaming",
+      "Agentic AI threats",
+      "State-level AI legislation",
       "AI Safety Bill"
     ],
     "Anthropic_Official": [
       "site:anthropic.com/news"
     ],
     "국제_규제_및_표준": [
-      "EU Cyber Resilience Act", "SEC Cybersecurity Disclosure", "NIST CSF 2.0",
-      "ISO/IEC 27001 Update", "Global Cybersecurity Norms", "Digital Sovereignty",
+      "EU Cyber Resilience Act",
+      "SEC Cybersecurity Disclosure",
+      "NIST CSF 2.0",
+      "ISO/IEC 27001 Update",
+      "Global Cybersecurity Norms",
+      "Digital Sovereignty",
       "Data Protection Regulation"
     ],
     "공급망_및_국가_안보": [
-      "Software Supply Chain Security", "SBOM Policy", "Critical Infrastructure Protection",
-      "National Defense Cybersecurity", "Cyber Warfare Strategy", "State-Sponsored Cyber Threats",
-      "Covert Network NSA advisory", "SOHO Router Botnet", "Volt Typhoon evolution"
+      "Software Supply Chain Security",
+      "SBOM Policy",
+      "Critical Infrastructure Protection",
+      "National Defense Cybersecurity",
+      "Cyber Warfare Strategy",
+      "State-Sponsored Cyber Threats",
+      "Covert Network NSA advisory",
+      "SOHO Router Botnet",
+      "Volt Typhoon evolution"
+    ],
+    "보안산업_시장_및_투자": [
+      "cybersecurity acquisition",
+      "cybersecurity funding round",
+      "security startup Series B",
+      "cybersecurity IPO",
+      "security vendor earnings",
+      "Palo Alto Networks acquisition",
+      "CrowdStrike acquisition",
+      "Microsoft security revenue",
+      "cybersecurity market forecast",
+      "security platform consolidation"
+    ],
+    "AI보안_산업동향": [
+      "Security for AI",
+      "AI security platform",
+      "AI SOC",
+      "LLM security",
+      "AI agent security",
+      "AI threat intelligence",
+      "securing AI systems",
+      "AI security startup funding",
+      "AI security market",
+      "prompt injection defense",
+      "AI red team platform"
     ]
-  }
+  },
+  "_comment_balance": "2026-10-15: 후보 40건이 취약점 38%·기업전략 10%로 기울어(목표 15%/40%) 전략·정책 지향 매체 5곳과 '보안산업_시장_및_투자' 카테고리를 추가하고, 출처 쿼터를 직접 피드 3건 / 검색 카테고리 8건으로 차등화했다.",
+  "_comment_feed_groups": "2026-10-15: CVE·CWE 밀착 보도 매체(vuln_feeds)와 보안산업 동향 매체(industry_feeds)를 분리해 쿼터를 2건 / 6건으로 차등화했다. 일률 쿼터에서는 취약점 매체를 누르면 산업 매체도 같이 눌려 두 목표를 동시에 달성할 수 없었다."
 }

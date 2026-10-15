@@ -22,6 +22,26 @@
     "CSOOnline": "https://www.csoonline.com/feed/"
   },
   "search_categories": {
+    "보안산업_시장_및_투자": [
+      "security startup",
+      "security vendor",
+      "cybersecurity acquisition",
+      "cybersecurity funding",
+      "AI security market"
+    ],
+    "AI보안_산업동향": [
+      "shadow AI",
+      "AI-driven security",
+      "AI-powered security",
+      "AI guardrails",
+      "AI SOC",
+      "AI for Security",
+      "prompt injection",
+      "AI security platform",
+      "Security for AI",
+      "model security",
+      "SOC automation"
+    ],
     "글로벌_보안_전략_및_트렌드": [
       "Cybersecurity Strategy",
       "Cybersecurity Policy",
@@ -90,33 +110,9 @@
       "Covert Network NSA advisory",
       "SOHO Router Botnet",
       "Volt Typhoon evolution"
-    ],
-    "보안산업_시장_및_투자": [
-      "cybersecurity acquisition",
-      "cybersecurity funding round",
-      "security startup Series B",
-      "cybersecurity IPO",
-      "security vendor earnings",
-      "Palo Alto Networks acquisition",
-      "CrowdStrike acquisition",
-      "Microsoft security revenue",
-      "cybersecurity market forecast",
-      "security platform consolidation"
-    ],
-    "AI보안_산업동향": [
-      "Security for AI",
-      "AI security platform",
-      "AI SOC",
-      "LLM security",
-      "AI agent security",
-      "AI threat intelligence",
-      "securing AI systems",
-      "AI security startup funding",
-      "AI security market",
-      "prompt injection defense",
-      "AI red team platform"
     ]
   },
   "_comment_balance": "2026-10-15: 후보 40건이 취약점 38%·기업전략 10%로 기울어(목표 15%/40%) 전략·정책 지향 매체 5곳과 '보안산업_시장_및_투자' 카테고리를 추가하고, 출처 쿼터를 직접 피드 3건 / 검색 카테고리 8건으로 차등화했다.",
-  "_comment_feed_groups": "2026-10-15: CVE·CWE 밀착 보도 매체(vuln_feeds)와 보안산업 동향 매체(industry_feeds)를 분리해 쿼터를 2건 / 6건으로 차등화했다. 일률 쿼터에서는 취약점 매체를 누르면 산업 매체도 같이 눌려 두 목표를 동시에 달성할 수 없었다."
+  "_comment_feed_groups": "2026-10-15: CVE·CWE 밀착 보도 매체(vuln_feeds)와 보안산업 동향 매체(industry_feeds)를 분리해 쿼터를 2건 / 6건으로 차등화했다. 일률 쿼터에서는 취약점 매체를 누르면 산업 매체도 같이 눌려 두 목표를 동시에 달성할 수 없었다.",
+  "_comment_search_terms": "2026-10-15: 검색어를 Google 뉴스 when:1d 실측으로 선별했다. 0건 검색어와 오탐 검색어(security spending -> 사회보장, security consolidation -> 주식 병합 등)를 제거하고, 공급이 부족한 시장·AI산업 카테고리를 앞으로 옮겨 seen_links 선점 순서를 바꿨다."
 }

@@ -472,6 +472,10 @@ def get_rss_news(recent_urls=None):
             feed_quota = {f"Expert_{n}": VULN_FEED_QUOTA for n in legacy_feeds}
             feed_quota.update({f"Expert_{n}": VULN_FEED_QUOTA for n in vuln_feeds})
             feed_quota.update({f"Expert_{n}": INDUSTRY_FEED_QUOTA for n in industry_feeds})
+            # 수집 창도 같은 기준으로 나눈다(source_name 기준 — 직접 피드 루프가 쓴다).
+            feed_recency = {n: RECENCY_VULN_FEED for n in legacy_feeds}
+            feed_recency.update({n: RECENCY_VULN_FEED for n in vuln_feeds})
+            feed_recency.update({n: RECENCY_INDUSTRY_FEED for n in industry_feeds})
             search_categories = config.get("search_categories", {})
     except Exception as e:
         print(f"feeds.json 로드 실패: {e}")
@@ -482,7 +486,6 @@ def get_rss_news(recent_urls=None):
     
     # 시간 필터링 기준 (현재 시간으로부터 24시간 전)
     now = time.time()
-    day_in_seconds = 24 * 60 * 60
 
     korean_media_blacklist = [
         "koreaherald.com", "koreatimes.co.kr", "koreatimes.com", "en.yna.co.kr", "yna.co.kr",
@@ -533,6 +536,7 @@ def get_rss_news(recent_urls=None):
 
     # 직접 피드 수집
     for source_name, rss_url in direct_feeds.items():
+        recency_window = feed_recency.get(source_name, RECENCY_VULN_FEED)
         try:
             feed = feedparser.parse(rss_url)
             if not feed.entries:
@@ -542,7 +546,7 @@ def get_rss_news(recent_urls=None):
             for entry in feed.entries[:20]:
                 is_recent = False
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    if now - calendar.timegm(entry.published_parsed) < day_in_seconds:
+                    if now - calendar.timegm(entry.published_parsed) < recency_window:
                         is_recent = True
                 
                 # 직접 피드에서도 한국어 포함 기사 엄격 제외
@@ -587,7 +591,7 @@ def get_rss_news(recent_urls=None):
         chunks = [keywords[i:i + KEYWORDS_PER_QUERY] for i in range(0, len(keywords), KEYWORDS_PER_QUERY)]
         for chunk in chunks:
             query = " OR ".join([f'"{k}"' if " " in k else k for k in chunk])
-            full_query = f"({query}) when:1d"
+            full_query = f"({query}) when:{SEARCH_TIME_WINDOW}"
             rss_url = f"https://news.google.com/rss/search?q={quote(full_query)}&hl=en-US&gl=US&ceid=US:en"
             try:
                 feed = feedparser.parse(rss_url)
@@ -597,7 +601,7 @@ def get_rss_news(recent_urls=None):
             for entry in feed.entries[:15]:
                 is_recent = True
                 if hasattr(entry, 'published_parsed') and entry.published_parsed:
-                    if now - calendar.timegm(entry.published_parsed) > day_in_seconds:
+                    if now - calendar.timegm(entry.published_parsed) > RECENCY_SEARCH:
                         is_recent = False
                 
                 # 제목에서 한국어 및 한국 매체명 체크
@@ -673,6 +677,7 @@ def get_rss_news(recent_urls=None):
         # 같은 사건을 다룬 다른 매체 기사 제외
         tokens = _dedup_tokens(entry['title'])
         if any(_same_event(tokens, prev, is_distinctive) for prev in seen_events):
+            _stat('dup_event')
             continue
 
         # 정례 사건은 매체별 수치가 갈려 토큰 비교로 잡히지 않으므로 서명으로 1건만 통과시킨다.
@@ -680,6 +685,7 @@ def get_rss_news(recent_urls=None):
         signature = _recurring_signature(entry['title'])
         if signature and signature in seen_signatures:
             print(f"  -> [정례 중복 제외] {signature}: {entry['title'][:60]}")
+            _stat('dup_signature')
             continue
 
         final_candidates.append(entry)
@@ -692,6 +698,8 @@ def get_rss_news(recent_urls=None):
             break
 
     print(f"총 {len(all_entries)}개 수집 -> 중복 제거 및 가치 평가 후 {len(final_candidates)}개 후보 선정.")
+    _stat('harvested', len(all_entries))
+    _stat('candidates', len(final_candidates))
     return final_candidates
 
 
@@ -705,9 +713,69 @@ def get_rss_news(recent_urls=None):
 #  (2026-10-15 실측: 일률 5건 시절 후보 40건 중 직접 피드 24건에 기업전략 0건·
 #   취약점 13건. 일률 3건으로 낮췄을 때는 취약점이 8%로 떨어졌지만 같은 쿼터에
 #   묶인 MSSPAlert·TheDecoder 같은 산업 매체도 3건에 갇혔다.)
+# 수집 창을 출처 성격별로 다르게 둔다. 24시간 일률 적용은 취약점 보도에 맞춰진
+#  기준이고, 업계·정책·위협분석 기사를 구조적으로 배제했다.
+#  (2026-10-15 실측 — SecurityWeek compliance 카테고리(취약점 0%, 기업전략·규제 각 3건):
+#   24h 0건 / 72h 0건. "LLM security"·"securing AI systems"·"espionage campaign":
+#   24h 1~2건 / 72h 5~7건. 제로데이는 어제 것이 중요하지만 EU 규제안이나 인수
+#   발표는 사흘 전 것도 그대로 유효하다.)
+#  교차일 중복은 recent_urls URL 비교·_same_event 토큰 비교·_recurring_signature
+#  세 겹으로 막혀 있어 창을 넓혀도 같은 기사가 재게시될 위험은 낮다.
+RECENCY_VULN_FEED = 24 * 60 * 60      # 취약점 보도는 시의성이 핵심
+RECENCY_INDUSTRY_FEED = 72 * 60 * 60  # 업계·정책·위협분석
+RECENCY_SEARCH = 72 * 60 * 60         # 검색 카테고리(전략·시장·규제)
+SEARCH_TIME_WINDOW = "3d"             # 구글 뉴스 when: 파라미터. 로컬 창과 함께 넓혀야 한다.
+
 VULN_FEED_QUOTA = 2        # CVE·CWE·패치·침해 보도 중심 매체
 INDUSTRY_FEED_QUOTA = 6    # 보안산업 동향·정책·AI보안 매체
 SEARCH_CATEGORY_QUOTA = 8  # 전략·정책·시장 검색 카테고리
+
+# 실행마다 한 줄로 지표를 남긴다. 이 저장소의 품질 문제는 전부 몇 주간 조용히
+#  진행된 뒤 사람이 눈치채서 발견됐다(취약점 비중 40%, Patch Tuesday 3중 게시,
+#  백스톱 14일 연속 중복 전송, 불릿 2문장 99%). 매 실행 로그에 구성이 찍히면
+#  편향 재발을 며칠 안에 알아볼 수 있다.
+RUN_STATS = {}
+
+
+def _stat(key, delta=1):
+    RUN_STATS[key] = RUN_STATS.get(key, 0) + delta
+
+
+# 게시물 주제 분류(지표용 근사치). 선정 쿼터의 4개 범주에 대응한다.
+_TOPIC_PATTERNS = [
+    ("기업전략", r"(인수|합병|출시|출범|통합|투자|매출|순이익|파트너|제휴|계약|로드맵|상장|시장|스타트업)"),
+    ("규제정책", r"(법|법안|규제|지침|의무|표준|공시|당국|위원회|감독|조달|권고|거버넌스)"),
+    ("취약점", r"(취약점|결함|패치|제로데이|악용|침해|랜섬웨어|탈취|유출|웹셸|백도어|봇넷|악성|CVE)"),
+]
+
+
+def classify_topic(title):
+    for name, pat in _TOPIC_PATTERNS:
+        if re.search(pat, title):
+            return name
+    return "AI·기술"
+
+
+def print_run_metrics():
+    """수집부터 게시까지의 구성을 한 줄로 남긴다(GitHub Actions 로그에서 추적용)."""
+    g = RUN_STATS.get
+    parts = [
+        f"harvested={g('harvested', 0)}",
+        f"candidates={g('candidates', 0)}",
+        f"selected={g('selected', 0)}",
+        f"posted={g('posted', 0)}",
+        f"dup_event={g('dup_event', 0)}",
+        f"dup_signature={g('dup_signature', 0)}",
+        f"dup_posted={g('dup_posted', 0)}",
+        f"regenerated={g('regenerated', 0)}",
+        f"gen_failed={g('gen_failed', 0)}",
+    ]
+    for name in ("기업전략", "규제정책", "취약점", "AI·기술"):
+        parts.append(f"topic_{name}={g('topic_' + name, 0)}")
+    if g('bullet_count', 0):
+        parts.append(f"avg_bullet={g('bullet_chars', 0) // g('bullet_count', 1)}")
+    print("[METRICS] " + " ".join(parts))
+
 
 PPLX_ENDPOINT = "https://api.perplexity.ai/chat/completions"
 
@@ -929,6 +997,13 @@ def select_top_news(news_list, recent_titles, want=10, recent_urls=None):
 - 특정 범주에 적합한 기사가 쿼터보다 적으면 그 범주는 적은 대로 두고, **다른 범주
   기사로 메우지 마십시오.** 특히 빈자리를 4번으로 채우는 것이 가장 심각한 오류입니다.
 - 쿼터를 합쳐 10건이 안 되는 것은 정상입니다. 쿼터를 넘기는 것이 더 나쁩니다.
+- [핵심 사건 예외 — 하루 1건까지만] 어떤 사건이 아래 중 하나에 해당하면, 그 사건 1건을
+  범주 쿼터와 **별도로** 추가 선정하십시오. 4번 쿼터를 쓰지 않고 추가하는 것입니다.
+  · 다수 국가 또는 다수 산업의 기관에 동시에 영향을 주는 사건
+  · 핵심 기반시설(전력·통신·금융·항만·의료)이나 공급망 전반을 겨냥한 사건
+  · 주요국 정부·규제기관이 공식 경고·긴급 지침을 발령한 사건
+  이 예외는 하루 1건이 상한이며, 해당하는 사건이 없으면 쓰지 마십시오. 평범한
+  취약점 공개나 단일 기업 침해를 이 예외로 끌어올리는 것은 쿼터 위반과 같습니다.
 
 [제외/중복 규칙]
 - 아래 '이미 게시된 제목'과 동일한 사건은 제외: {json.dumps(recent_titles, ensure_ascii=False)}
@@ -1411,6 +1486,7 @@ def generate_article(candidate):
     reasons = _all_reasons(parsed)
     if reasons:
         print(f"  -> 품질 미달로 재생성: {candidate.get('title','')[:30]} ({len(reasons)}개 사유)")
+        _stat('regenerated')
         try:
             retried = _call("\n".join(reasons))
             # 재생성이 더 나빠질 수 있으므로 사유가 줄어든 경우에만 채택
@@ -1480,6 +1556,8 @@ def analyze_news_with_perplexity(news_list, recent_titles, recent_urls=None):
         raise auth_error
 
     results = [a for a in slots if a]
+    _stat('selected', len(results))
+    _stat('gen_failed', total - len(results))
     print(f"최종 {len(results)}개 기사 생성 완료.")
     return results
 
@@ -1694,6 +1772,11 @@ def main():
             if norm:
                 posted_this_run.add(norm)
             post_ok += 1
+            _stat('posted')
+            _stat('topic_' + classify_topic(news.get('title', '')))
+            for b in re.findall(r"<li>(.*?)</li>", str(news.get('content', '')), re.S):
+                _stat('bullet_count')
+                _stat('bullet_chars', len(re.sub(r"<[^>]+>", "", b).strip()))
             time.sleep(5)
         except Exception as e:
             print(f"처리 중 오류: {e}")
@@ -1707,6 +1790,8 @@ def main():
         f"게시 성공 {post_ok}"
         + (f", 게시 실패 {post_fail}" if post_fail else "")
     )
+    _stat('dup_posted', dup_skipped)
+    print_run_metrics()
 
     # 한 건도 올리지 못했다면 success로 끝내지 않는다. 뉴스가 없는 날과
     # 파이프라인이 깨진 날을 워크플로 결과만으로 구분할 수 있어야 한다.

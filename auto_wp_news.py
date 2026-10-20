@@ -326,6 +326,39 @@ _DEDUP_STOPWORDS = {
 }
 
 
+# 뉴스가 아닌 '형식'을 후보 단계에서 걸러낸다.
+#  (2026-10-20: 후보 40건 중 모델이 3건만 골랐다. 주제 적합성 관문이 올바르게
+#   배제한 결과였지만, 그만큼 40칸이 뉴스 아닌 것으로 차 있었다는 뜻이다.
+#   관측 예: "[Webinar] AI Governance Across the Manufacturing Lifecycle",
+#   "AI Governance in Trucking: Managing Shadow AI and Fleet Risks - Commercial Carrier",
+#   "Dito Joins the Google Cloud Managed Security Services Partner Program",
+#   "CyCraft Technology Positioned as a Pace Setter in the 2026 Gartner")
+#  도메인이 아니라 형식을 보므로 새로운 저품질 출처에도 작동한다.
+_NON_NEWS_TITLE_PAT = re.compile(
+    r"(\[webinar\]|\bwebinar\b|virtual event|on-demand|register now|save the date|"
+    r"\bjoin us\b|^top \d+|^best \d+|^\d+ best\b|^how to\b|^what is\b|"
+    r"^understanding\b|^a guide to\b|best practices|"
+    r"\bjoins .{0,70}?\b(program|alliance|consortium)\b|\bpositioned as\b|named a leader|"
+    r"\bwins .{0,30}?award|\brecognized (as|for)\b|announces the availability)",
+    re.I)
+
+# 사이버보안 글로벌 동향과 무관한 버티컬 업계지와, 보도자료 배포망.
+#  배포망(prnewswire 등)은 정의상 홍보물이라 선정 프롬프트가 어차피 배제한다.
+_LOW_QUALITY_DOMAINS = (
+    "cmswire.com", "commercialcarrierjournal.com", "sourcesecurity.com",
+    "lawfuel.com", "prnewswire.com", "businesswire.com", "globenewswire.com",
+    "einpresswire.com", "accesswire.com", "newsfilecorp.com", "openpr.com",
+)
+
+
+def _is_non_news(title, link=""):
+    """뉴스가 아닌 형식이거나 저품질 출처면 True."""
+    if _NON_NEWS_TITLE_PAT.search(str(title).strip()):
+        return True
+    low = str(link).lower()
+    return any(d in low for d in _LOW_QUALITY_DOMAINS)
+
+
 def _dedup_tokens(text):
     """제목/URL에서 사건 식별용 토큰을 뽑아 (고유명사·식별자, 일반어)로 나눈다.
 
@@ -580,6 +613,11 @@ def get_rss_news(recent_urls=None):
                     link_lower = actual_link.lower()
                     if any(site in link_lower for site in korean_media_blacklist):
                         is_recent = False
+
+                # 뉴스가 아닌 형식·저품질 출처 배제
+                if is_recent and _is_non_news(entry.title, actual_link):
+                    is_recent = False
+                    _stat('dropped_non_news')
                 
                 # 출처 이름 체크
                 source_title = entry.source.get('title', '') if hasattr(entry, 'source') else ''
@@ -643,6 +681,11 @@ def get_rss_news(recent_urls=None):
                     if any(site in link_lower for site in korean_media_blacklist):
                         is_recent = False
                     
+                    # 뉴스가 아닌 형식·저품질 출처 배제
+                    if is_recent and _is_non_news(entry.title, actual_link):
+                        is_recent = False
+                        _stat('dropped_non_news')
+
                     if is_recent and actual_link not in seen_links:
                         all_entries.append({
                             "title": entry.title,
@@ -786,6 +829,7 @@ def print_run_metrics():
         f"dup_event={g('dup_event', 0)}",
         f"dup_signature={g('dup_signature', 0)}",
         f"dup_posted={g('dup_posted', 0)}",
+        f"dropped_non_news={g('dropped_non_news', 0)}",
         f"regenerated={g('regenerated', 0)}",
         f"gen_failed={g('gen_failed', 0)}",
     ]
@@ -1023,9 +1067,11 @@ def select_top_news(news_list, recent_titles, want=10, recent_urls=None):
 - [4번 상한이 가장 중요합니다] 개별 취약점·패치·침해 사고 기사가 후보에 아무리 많아도
   그중 파급력이 가장 큰 **1건만** 고르고 나머지는 전부 버리십시오. 후보의 절반이
   취약점 기사인 날이 많은데, 그것은 매체 구성 탓이며 선정 비중의 근거가 아닙니다.
-- 특정 범주에 적합한 기사가 쿼터보다 적으면 그 범주는 적은 대로 두고, **다른 범주
-  기사로 메우지 마십시오.** 특히 빈자리를 4번으로 채우는 것이 가장 심각한 오류입니다.
-- 쿼터를 합쳐 10건이 안 되는 것은 정상입니다. 쿼터를 넘기는 것이 더 나쁩니다.
+- [쿼터는 상한이면서 동시에 목표입니다] 각 범주를 쿼터만큼 채우는 것을 기본으로 하십시오.
+  후보에 그 범주에 해당하는 적합한 기사가 있는데도 비워 두지 마십시오. 1~3번은 목표치이고,
+  **4번만 엄격한 상한**입니다.
+- 특정 범주에 적합한 기사가 쿼터보다 적을 때만 그 범주를 적게 채우고, 다른 범주 기사로
+  메우지 마십시오. 특히 빈자리를 4번으로 채우는 것이 가장 심각한 오류입니다.
 - [핵심 사건 예외 — 하루 1건까지만] 어떤 사건이 아래 중 하나에 해당하면, 그 사건 1건을
   범주 쿼터와 **별도로** 추가 선정하십시오. 4번 쿼터를 쓰지 않고 추가하는 것입니다.
   · 다수 국가 또는 다수 산업의 기관에 동시에 영향을 주는 사건
@@ -1046,9 +1092,13 @@ def select_top_news(news_list, recent_titles, want=10, recent_urls=None):
 - 한국 매체/한국어 기사는 제외(사전 필터되었으나 재확인).
 
 [개수 규칙 — 매우 중요]
-- {want}개를 채우는 것은 목표가 아닙니다. **적합한 기사가 {want}개보다 적으면 적은 대로 반환하십시오.**
-- 적합한 기사가 3개뿐이면 3개만, 하나도 없으면 빈 배열을 반환하십시오.
 - 개수를 맞추려고 위 '주제 적합성'에서 탈락한 기사를 넣는 것이 가장 심각한 오류입니다.
+  그런 경우에만 {want}개보다 적게 반환하십시오.
+- [과소 선정 경계 — 중요] 후보 목록에는 사이버보안·ICT·AI 기사가 대부분입니다. 선정이
+  6건 이하로 떨어졌다면 기준을 지나치게 좁게 적용했을 가능성이 높습니다. 그때는 탈락시킨
+  후보를 다시 훑어, 범주 쿼터를 채울 수 있는 기사가 있는지 확인하십시오. 완벽하지 않더라도
+  해당 범주에서 상대적으로 가치가 높은 기사를 고르는 것이 비워 두는 것보다 낫습니다.
+- 그래도 적합한 기사가 정말 부족하면 적은 대로 반환합니다(하나도 없으면 빈 배열).
 
 선정한 후보의 index 번호를 정수 배열로만 반환하십시오.
 

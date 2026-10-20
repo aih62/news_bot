@@ -34,6 +34,11 @@ if not WP_SITE_URL:
     WP_SITE_URL = "https://ajken.mycafe24.com"
 WP_SITE_URL = WP_SITE_URL.rstrip("/")
 
+# 중복 비교에 쓸 과거 게시물의 기간(일). 수집 창 최대치(72시간)와 맞춘다.
+RECENT_COMPARE_DAYS = 3
+# WP REST의 after 파라미터는 사이트 시간 기준으로 해석된다(이 사이트는 gmt_offset=9).
+SITE_TZ_OFFSET_SEC = 9 * 3600
+
 # 보장된 기본 이미지 ID (워드프레스 미디어 라이브러리 내 실제 ID)
 #  ※ 기존 5680은 삭제되어 404 → featured_media=0(이미지 없음)으로 폴백되던 문제를 수정.
 #    반드시 미디어 라이브러리에 실제 존재하는 ID를 유지할 것.
@@ -211,7 +216,15 @@ def get_recent_posts_info():
     print("최근 포스팅된 뉴스 제목/출처 확인 중...")
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
     auth = HTTPBasicAuth(WP_USERNAME, WP_APP_PASSWORD)
-    params = {"per_page": 30, "status": "publish"}  # 당일을 넘어선 교차 중복까지 비교
+    # 개수(30개)가 아니라 기간으로 자른다.
+    #  개수로 고정하면 하루 게시량이 줄 때 그 30개가 덮는 기간이 늘어나, 중복 배제가
+    #  과거로 번지고 그래서 게시량이 더 줄어드는 하강 나선이 생긴다.
+    #  (2026-10-20 실측: 하루 10건일 때 30개는 3일치였는데, 하루 3~4건으로 줄자
+    #   30개가 5일치를 덮어 닷새 전 사건까지 중복으로 걸러냈다.
+    #   10-18 9건 -> 10-19 4건 -> 10-20 3건의 가속이 이 모양과 맞는다.)
+    cutoff = time.time() - RECENT_COMPARE_DAYS * 86400
+    since = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(cutoff + SITE_TZ_OFFSET_SEC))
+    params = {"per_page": 100, "status": "publish", "after": since}
     titles, source_urls = [], set()
     try:
         res = session.get(endpoint, auth=auth, params=params, timeout=20, verify=False)
@@ -223,7 +236,8 @@ def get_recent_posts_info():
                 for href in re.findall(r"href=['\"]([^'\"]+)['\"]", content_html):
                     if href.startswith("http"):
                         source_urls.add(normalize_url(href))
-            print(f"  -> 최근 {len(titles)}개 포스트 로드 완료 (출처 URL {len(source_urls)}개 추출).")
+            print(f"  -> 최근 {RECENT_COMPARE_DAYS}일치({since} 이후) 포스트 {len(titles)}개 "
+                  f"로드 완료 (출처 URL {len(source_urls)}개 추출).")
             return titles, source_urls
     except Exception as e:
         print(f"최근 포스트 정보 가져오기 실패: {e}")

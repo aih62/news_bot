@@ -25,6 +25,72 @@
     "CiscoTalos": "https://blog.talosintelligence.com/rss/"
   },
   "search_categories": {
+    "보안산업_시장_및_투자": [
+      "security startup",
+      "security vendor",
+      "cybersecurity acquisition",
+      "cybersecurity funding",
+      "AI security market"
+    ],
+    "글로벌_보안_전략_및_트렌드": [
+      "Cybersecurity Strategy",
+      "Cybersecurity Policy",
+      "Cybersecurity Regulation",
+      "National Cybersecurity",
+      "Cybersecurity Market",
+      "Cybersecurity Investment",
+      "Cybersecurity M&A",
+      "Cybersecurity Trends 2026",
+      "Security Transformation",
+      "National Cybersecurity Strategy 2026",
+      "Agentic AI Security"
+    ],
+    "국제_규제_및_표준": [
+      "EU Cyber Resilience Act",
+      "SEC Cybersecurity Disclosure",
+      "NIST CSF 2.0",
+      "ISO/IEC 27001 Update",
+      "Global Cybersecurity Norms",
+      "Digital Sovereignty",
+      "Data Protection Regulation"
+    ],
+    "빅테크_및_플랫폼_보안": [
+      "Microsoft Security Strategy",
+      "Google Cloud Security",
+      "Amazon AWS Security",
+      "Palo Alto Networks Platform",
+      "CrowdStrike Falcon",
+      "Big Tech Security Policy",
+      "Enterprise Security Platform",
+      "Security Consolidation",
+      "Autonomous Security Operations",
+      "Microsoft security roadmap",
+      "Google Cloud security launch",
+      "Cisco security acquisition",
+      "enterprise security product launch",
+      "SIEM consolidation vendor"
+    ],
+    "공급망_및_국가_안보": [
+      "Software Supply Chain Security",
+      "SBOM Policy",
+      "Critical Infrastructure Protection",
+      "National Defense Cybersecurity",
+      "Cyber Warfare Strategy",
+      "State-Sponsored Cyber Threats",
+      "Covert Network NSA advisory",
+      "SOHO Router Botnet",
+      "Volt Typhoon evolution"
+    ],
+    "위협인텔_및_APT": [
+      "threat landscape",
+      "threat actor",
+      "cyber espionage",
+      "advanced persistent threat",
+      "threat intelligence report",
+      "APT group",
+      "state-sponsored hackers",
+      "espionage campaign"
+    ],
     "AI위협_및_악용동향": [
       "AI-powered attacks",
       "weaponized AI",
@@ -49,52 +115,6 @@
       "shadow AI",
       "model security"
     ],
-    "보안산업_시장_및_투자": [
-      "security startup",
-      "security vendor",
-      "cybersecurity acquisition",
-      "cybersecurity funding",
-      "AI security market"
-    ],
-    "위협인텔_및_APT": [
-      "threat landscape",
-      "threat actor",
-      "cyber espionage",
-      "advanced persistent threat",
-      "threat intelligence report",
-      "APT group",
-      "state-sponsored hackers",
-      "espionage campaign"
-    ],
-    "글로벌_보안_전략_및_트렌드": [
-      "Cybersecurity Strategy",
-      "Cybersecurity Policy",
-      "Cybersecurity Regulation",
-      "National Cybersecurity",
-      "Cybersecurity Market",
-      "Cybersecurity Investment",
-      "Cybersecurity M&A",
-      "Cybersecurity Trends 2026",
-      "Security Transformation",
-      "National Cybersecurity Strategy 2026",
-      "Agentic AI Security"
-    ],
-    "빅테크_및_플랫폼_보안": [
-      "Microsoft Security Strategy",
-      "Google Cloud Security",
-      "Amazon AWS Security",
-      "Palo Alto Networks Platform",
-      "CrowdStrike Falcon",
-      "Big Tech Security Policy",
-      "Enterprise Security Platform",
-      "Security Consolidation",
-      "Autonomous Security Operations",
-      "Microsoft security roadmap",
-      "Google Cloud security launch",
-      "Cisco security acquisition",
-      "enterprise security product launch",
-      "SIEM consolidation vendor"
-    ],
     "AI_및_디지털_거버넌스": [
       "AI Security Policy",
       "AI Safety Framework",
@@ -114,26 +134,6 @@
     ],
     "Anthropic_Official": [
       "site:anthropic.com/news"
-    ],
-    "국제_규제_및_표준": [
-      "EU Cyber Resilience Act",
-      "SEC Cybersecurity Disclosure",
-      "NIST CSF 2.0",
-      "ISO/IEC 27001 Update",
-      "Global Cybersecurity Norms",
-      "Digital Sovereignty",
-      "Data Protection Regulation"
-    ],
-    "공급망_및_국가_안보": [
-      "Software Supply Chain Security",
-      "SBOM Policy",
-      "Critical Infrastructure Protection",
-      "National Defense Cybersecurity",
-      "Cyber Warfare Strategy",
-      "State-Sponsored Cyber Threats",
-      "Covert Network NSA advisory",
-      "SOHO Router Botnet",
-      "Volt Typhoon evolution"
     ]
   },
   "_comment_balance": "2026-10-15: 후보 40건이 취약점 38%·기업전략 10%로 기울어(목표 15%/40%) 전략·정책 지향 매체 5곳과 '보안산업_시장_및_투자' 카테고리를 추가하고, 출처 쿼터를 직접 피드 3건 / 검색 카테고리 8건으로 차등화했다.",
@@ -141,5 +141,6 @@
   "_comment_search_terms": "2026-10-15: 검색어를 Google 뉴스 when:1d 실측으로 선별했다. 0건 검색어와 오탐 검색어(security spending -> 사회보장, security consolidation -> 주식 병합 등)를 제거하고, 공급이 부족한 시장·AI산업 카테고리를 앞으로 옮겨 seen_links 선점 순서를 바꿨다.",
   "_comment_intel_feeds": "2026-10-15: 위협 인텔 1차 출처가 전무해 Unit42·CiscoTalos를 산업군에 추가했다. Mandiant/GTIG는 피드가 0건, Securelist·WeLiveSecurity·ProjectZero·NCSC는 24h/72h 모두 0건이라 제외했다. 비미국 관점으로 TheRegister를 취약점군에 넣었다.",
   "_comment_apt_category": "2026-10-15: 위협 인텔 1차 출처의 RSS가 대부분 죽어 있어(Mandiant 0건, Securelist·WeLiveSecurity·ProjectZero 24h/72h 0건) 검색 카테고리로 보완했다. Google 뉴스는 이들의 분석을 집계하므로 막힌 1차 출처도 이 경로로 들어온다.",
-  "_comment_ai_axis": "2026-10-15: AI x 보안을 '제품·시장'과 '위협·악용' 두 축으로 분리했다. 카테고리별 쿼터가 8건이라 분리하면 AI 축 공급 상한이 8 -> 16으로 늘어난다. 취약점의 발견·패치·KEV 등재 자체는 관심 대상이 아니라는 요구를 반영했다."
+  "_comment_ai_axis": "2026-10-15: AI x 보안을 '제품·시장'과 '위협·악용' 두 축으로 분리했다. 카테고리별 쿼터가 8건이라 분리하면 AI 축 공급 상한이 8 -> 16으로 늘어난다. 취약점의 발견·패치·KEV 등재 자체는 관심 대상이 아니라는 요구를 반영했다.",
+  "_comment_order": "2026-10-20: AI 축을 앞에 두자 후보 풀이 63% AI가 되고 최근 게시물도 대부분 AI여서 '이미 다룬 사건' 중복 판정이 급증해 선정이 4건까지 떨어졌다. AI 선정은 쿼터 3건에 묶여 있어 공급을 줄여도 AI 게시량은 그대로이고, 비워진 자리를 공급이 부족한 기업전략·규제정책이 채운다. 그래서 시장·정책 카테고리를 앞으로 옮겼다."
 }

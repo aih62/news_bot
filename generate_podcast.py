@@ -2,7 +2,7 @@ import os
 import time
 import json
 import requests
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 from bs4 import BeautifulSoup
 import html
 from dotenv import load_dotenv
@@ -11,6 +11,10 @@ import re
 
 import sys
 sys.path.append(r"C:\Users\inhoe\AppData\Roaming\Python\Python313\site-packages")
+
+# NotebookLM 도메인 이전(notebook.google.com) 대응 패치. 라이브러리 사용 전에 적용해야 합니다.
+import notebooklm_domain_patch
+notebooklm_domain_patch.apply()
 
 # NotebookLM
 from notebooklm import NotebookLMClient
@@ -43,35 +47,63 @@ AUDIO_INSTRUCTIONS = os.getenv("NOTEBOOKLM_AUDIO_INSTRUCTIONS", "전문적인 �
 AUDIO_FORMAT = os.getenv("NOTEBOOKLM_AUDIO_FORMAT", "deep-dive")
 AUDIO_LENGTH = os.getenv("NOTEBOOKLM_AUDIO_LENGTH", "default")
 
+def get_kst_today():
+    """한국 시간 기준 오늘 날짜(YYYY-MM-DD)."""
+    return datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+
+
 def get_today_posts_content():
-    """워드프레스에서 오늘 날짜의 최신 포스트 10개를 가져와 제목과 본문(텍스트) 목록을 반환합니다."""
-    print("워드프레스에서 오늘 포스팅 가져오는 중...", flush=True)
+    """워드프레스에서 **당일 게시된 글만** 가져와 제목과 본문(텍스트)을 반환합니다.
+
+    이전에는 이름만 'today'이고 날짜 조건이 없어 최신 10건을 그대로 가져왔다. 당일
+    게시가 없는 날에는 전날 글로 팟캐스트를 만들게 되고, 같은 내용이 날짜만 바꿔
+    브리핑 페이지에 다시 올라간다. 그래서 REST의 after/before로 당일만 자른다.
+    (이 사이트는 gmt_offset=9 이므로 REST 날짜 조건이 KST로 해석된다.)
+    """
+    today = get_kst_today()
+    print(f"워드프레스에서 당일({today}) 포스팅 확인 중...", flush=True)
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/posts"
-    params = {"per_page": 10, "status": "publish"}
+    params = {
+        "per_page": 30,
+        "status": "publish",
+        "after": f"{today}T00:00:00",
+        "before": f"{today}T23:59:59",
+        "orderby": "date",
+        "order": "asc",
+    }
     posts_data = []
-    
+
     try:
         res = requests.get(endpoint, params=params, timeout=20)
-        if res.status_code == 200:
-            posts = res.json()
-            
-            for post in posts:
-                title = html.unescape(post['title']['rendered'])
-                content_html = post['content']['rendered']
-                soup = BeautifulSoup(content_html, 'html.parser')
-                
-                # 텍스트만 추출 (스크립트, 스타일 시트 제외)
-                for script_or_style in soup(['script', 'style']):
-                    script_or_style.decompose()
-                
-                clean_text = soup.get_text(separator='\n', strip=True)
-                posts_data.append({"title": title, "content": clean_text})
-                            
-            print(f"-> 총 {len(posts_data)}개의 포스트 내용을 성공적으로 추출했습니다.", flush=True)
-            return posts_data
+        if res.status_code != 200:
+            print(f"포스트 조회 실패 (HTTP {res.status_code})", flush=True)
+            return []
+
+        for post in res.json():
+            # 방어적 재확인: REST 필터를 신뢰하되 날짜를 한 번 더 검사한다.
+            if not str(post.get("date", "")).startswith(today):
+                continue
+            title = html.unescape(post["title"]["rendered"])
+            soup = BeautifulSoup(post["content"]["rendered"], "html.parser")
+            for script_or_style in soup(["script", "style"]):
+                script_or_style.decompose()
+            posts_data.append({
+                "title": title,
+                "content": soup.get_text(separator="\n", strip=True),
+            })
+
+        if not posts_data:
+            print(f"-> 당일({today}) 게시된 글이 없습니다.", flush=True)
+            return []
+
+        print(f"-> 당일 게시 {len(posts_data)}건을 소스로 사용합니다.", flush=True)
+        for i, d in enumerate(posts_data, 1):
+            print(f"     {i}. {d['title'][:58]}", flush=True)
+        return posts_data
     except Exception as e:
         print(f"포스트 데이터 가져오기 실패: {e}", flush=True)
     return []
+
 
 async def generate_notebooklm_podcast(posts_data):
     """NotebookLM-py를 사용하여 추출된 텍스트를 기반으로 팟캐스트를 생성하고 다운로드합니다."""
@@ -353,10 +385,13 @@ def update_wordpress_briefing_page(links):
     print("워드프레스 '브리핑' 페이지(ID: 4440) 업데이트 중...")
     from requests.auth import HTTPBasicAuth
     
-    WP_USERNAME = os.getenv("WP_USERNAME", "inhoe.an@gmail.com")
+    # 자격증명은 .env / GitHub Secret 에서만 읽는다.
+    #  이 저장소는 공개이므로 평문 폴백을 두면 커밋 히스토리에 영구히 남는다.
+    WP_USERNAME = os.getenv("WP_USERNAME")
     WP_APP_PASSWORD = os.getenv("WP_APP_PASSWORD")
-    if not WP_APP_PASSWORD:
-        WP_APP_PASSWORD = 'ISPe NJZf FCSb Qwh3 MPf2 ZPds'
+    if not (WP_USERNAME and WP_APP_PASSWORD):
+        print("-> WP_USERNAME / WP_APP_PASSWORD 환경변수가 없어 브리핑 페이지 갱신을 건너뜁니다.")
+        return
     
     page_id = 4440
     endpoint = f"{WP_SITE_URL}/wp-json/wp/v2/pages/{page_id}"
@@ -395,7 +430,9 @@ async def main():
     # 1. 워드프레스에서 오늘자 뉴스 내용 추출 (본문 텍스트 포함)
     posts_data = get_today_posts_content()
     if not posts_data:
-        print("추출된 뉴스 데이터가 없습니다. 종료합니다.")
+        # 전날 글로 팟캐스트를 만들어 같은 내용이 날짜만 바꿔 다시 올라가는 것을 막는다.
+        print(f"[건너뜀] 당일({get_kst_today()}) 게시 글이 없어 "
+              f"팟캐스트·슬라이드를 생성하지 않습니다.")
         return
         
     print(f"총 수집된 포스트 개수: {len(posts_data)}")
